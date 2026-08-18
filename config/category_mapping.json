@@ -1,0 +1,144 @@
+{
+  "_comment": [
+    "Rules are checked IN ORDER. First match wins.",
+    "subcategory_contains: list of substrings (case-insensitive) matched against the Subcategory column.",
+    "  - Empty list [] means 'match any subcategory' for this product_group.",
+    "  - A row matches if ANY of the listed terms is a substring of the row's Subcategory.",
+    "block: the type-label written in the output block header row.",
+    "  - '__USE_SUBCATEGORY__' means copy the row's Subcategory value as the block label.",
+    "Put more specific rules BEFORE more general ones (e.g. 'Built-in Microwave' before 'Microwave')."
+  ],
+  "rules": [
+    {
+      "_comment": "MICROWAVES — built-in first (more specific than generic Microwave)",
+      "product_group": "Cooking",
+      "subcategory_contains": ["Built-in Microwave"],
+      "m10_sheet": "Microwaves",
+      "block": "Built-in"
+    },
+    {
+      "_comment": "MICROWAVES — freestanding / countertop",
+      "product_group": "Cooking",
+      "subcategory_contains": ["Microwave Oven", "Microwave"],
+      "m10_sheet": "Microwaves",
+      "block": "Freestanding"
+    },
+    {
+      "_comment": "OVENS — freestanding ranges / cookers",
+      "product_group": "Cooking",
+      "subcategory_contains": ["Freestanding Cooker", "Range Cooker", "Freestanding Range"],
+      "m10_sheet": "Ovens",
+      "block": "Freestanding"
+    },
+    {
+      "_comment": "OVENS — built-in (all wall-oven types)",
+      "product_group": "Cooking",
+      "subcategory_contains": [
+        "Built-in Oven",
+        "Pyrolytic Oven",
+        "Double Oven",
+        "Speed Oven",
+        "Steam Combination Oven",
+        "Steam Oven",
+        "Compact Oven",
+        "Wall Oven"
+      ],
+      "m10_sheet": "Ovens",
+      "block": "Built-in"
+    },
+    {
+      "_comment": "COOKTOPS — Induction",
+      "product_group": "Cooking",
+      "subcategory_contains": ["Induction Cooktop", "Induction Hob"],
+      "m10_sheet": "Cooktops",
+      "block": "Induction"
+    },
+    {
+      "_comment": "COOKTOPS — Gas",
+      "product_group": "Cooking",
+      "subcategory_contains": ["Gas Cooktop", "Gas Hob"],
+      "m10_sheet": "Cooktops",
+      "block": "Gas"
+    },
+    {
+      "_comment": "COOKTOPS — Ceramic / Electric / Vitroceramic",
+      "product_group": "Cooking",
+      "subcategory_contains": [
+        "Ceramic Cooktop",
+        "Electric Cooktop",
+        "Vitroceramic Cooktop",
+        "Ceramic Hob"
+      ],
+      "m10_sheet": "Cooktops",
+      "block": "Ceramic"
+    },
+    {
+      "_comment": "RANGEHOODS — block label is taken from the row's Subcategory value. Add new hood subcategory keywords here as brands introduce them.",
+      "product_group": "Cooking",
+      "subcategory_contains": [
+        "Rangehood",
+        "Range Hood",
+        "Hood",
+        "Canopy",
+        "DownDraft",
+        "Downdraft",
+        "Undermount",
+        "Slide Out",
+        "Slideout"
+      ],
+      "m10_sheet": "Rangehoods",
+      "block": "__USE_SUBCATEGORY__"
+    },
+    {
+      "_comment": "DISHWASHERS — all subcategories in Dishwashing product group",
+      "product_group": "Dishwashing",
+      "subcategory_contains": [],
+      "m10_sheet": "DishWashers",
+      "block": "Dishwasher"
+    },
+    {
+      "_comment": "FRIDGES & FREEZERS — fridge types (must come before generic Freezer rule)",
+      "product_group": "Refrigeration",
+      "subcategory_contains": [
+        "French Door",
+        "Side by Side",
+        "Top Mount",
+        "Bottom Mount",
+        "Quad Door",
+        "Single Door",
+        "Column Refrigerator",
+        "Integrated Fridge",
+        "Multi-Door"
+      ],
+      "m10_sheet": "Fridges & Freezers",
+      "block": "Fridge"
+    },
+    {
+      "_comment": "FRIDGES & FREEZERS — freezers (specific types first, then catch-all Freezer)",
+      "product_group": "Refrigeration",
+      "subcategory_contains": [
+        "Chest Freezer",
+        "Upright Freezer",
+        "Column Freezer",
+        "Integrated Freezer",
+        "Freezer"
+      ],
+      "m10_sheet": "Fridges & Freezers",
+      "block": "Freezer"
+    },
+    {
+      "_comment": "FRIDGES & FREEZERS — wine / beverage coolers",
+      "product_group": "Refrigeration",
+      "subcategory_contains": [
+        "Wine Cabinet",
+        "Wine Cooler",
+        "Wine Fridge",
+        "Beverage Centre",
+        "Beverage Center",
+        "Beverage Fridge"
+      ],
+      "m10_sheet": "Fridges & Freezers",
+      "block": "Beverage Fridge"
+    }
+  ]
+}

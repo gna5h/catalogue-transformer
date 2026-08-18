@@ -1,0 +1,42 @@
+{
+  "_comment": [
+    "Secondary override rules applied BEFORE the main category_mapping.json rules.",
+    "Use these for ambiguous subcategories where the Product Name or Model / SKU must",
+    "be inspected to determine the correct M10 sheet and block.",
+    "",
+    "Structure:",
+    "  product_group           - must match exactly (case-insensitive)",
+    "  trigger_subcategory_contains - list of substrings; override fires if ANY matches the row's Subcategory",
+    "  rules                   - checked in order; first keyword match wins",
+    "    check_fields          - list of source column names to search (concatenated)",
+    "    keyword_contains      - row matches if ANY keyword is a substring (case-insensitive)",
+    "    m10_sheet / block     - destination"
+  ],
+  "overrides": [
+    {
+      "_comment": "LG 'Specialty' covers both fridge and freezer models. Inspect name/SKU to disambiguate.",
+      "product_group": "Refrigeration",
+      "trigger_subcategory_contains": ["Specialty"],
+      "rules": [
+        {
+          "check_fields": ["Product Name", "Model / SKU"],
+          "keyword_contains": ["Freezer"],
+          "m10_sheet": "Fridges & Freezers",
+          "block": "Freezer"
+        },
+        {
+          "check_fields": ["Product Name", "Model / SKU"],
+          "keyword_contains": ["Wine", "Beverage"],
+          "m10_sheet": "Fridges & Freezers",
+          "block": "Beverage Fridge"
+        },
+        {
+          "check_fields": ["Product Name", "Model / SKU"],
+          "keyword_contains": ["Fridge", "Refrigerator"],
+          "m10_sheet": "Fridges & Freezers",
+          "block": "Fridge"
+        }
+      ]
+    }
+  ]
+}

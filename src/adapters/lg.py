@@ -57,10 +57,10 @@ _DIM_KEYWORD_RE = re.compile(
     re.IGNORECASE,
 )
 
-# A label refers to cavity / cutout / packaging (not overall unit size)
+# A label refers to cavity / cutout / packaging / adjustable features (not overall unit size)
 _CAVITY_RE = re.compile(
     r'\b(cutout|cut[\s-]out|cavity|recess|installation|opening|'
-    r'packing|shipping|gross)\b',
+    r'pack(?:ing|aging)|shipping|gross|adjustable)\b',
     re.IGNORECASE,
 )
 
@@ -88,6 +88,9 @@ _SINGLE_AXIS = {
     'h':      'H',
     'd':      'D',
 }
+
+# Plausibility bounds for any single axis of a major household appliance (mm)
+_PLAUSIBLE_MM = (200, 2500)
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +232,21 @@ def _specs_from_html(soup: BeautifulSoup) -> list[tuple[str, str]]:
                 value_el.get_text(' ', strip=True),
             ))
 
+    # LG AEM CMS component: c-compare-selling spec rows (product comparison pages)
+    # Structure: li.c-compare-selling__item >
+    #   div.c-compare-selling__spec-name (label) + div.c-compare-selling__spec-desc (value)
+    # Extract labels that contain an axis triplet (WxHxD) OR a dimension keyword
+    # (height, width, depth) — the latter covers fridge single-axis labels.
+    # Non-dimension feature labels (adjustable, packing, etc.) are handled downstream
+    # by _CAVITY_RE / _should_use_label.
+    for item in soup.find_all(class_='c-compare-selling__item'):
+        label_el = item.find(class_='c-compare-selling__spec-name')
+        value_el = item.find(class_='c-compare-selling__spec-desc')
+        if label_el and value_el and label_el != value_el:
+            label = label_el.get_text(' ', strip=True)
+            if _AXIS_TRIPLET_RE.search(label) or _DIM_KEYWORD_RE.search(label):
+                results.append((label, value_el.get_text(' ', strip=True)))
+
     return results
 
 
@@ -241,6 +259,78 @@ def _specs_from_text(text: str) -> list[tuple[str, str]]:
         if m:
             results.append((m.group(1).strip(), m.group(2).strip()))
     return results
+
+
+# ---------------------------------------------------------------------------
+# Depth-variant helpers
+# ---------------------------------------------------------------------------
+
+def _depth_variant_score(label: str) -> int:
+    """Priority for depth-variant labels. Higher score = more preferred."""
+    lo = label.lower()
+    if 'handle' in lo and 'without' not in lo:
+        return 3   # "Depth - With Door & Handle"
+    if 'handle' in lo:
+        return 2   # "Depth - Without Handle"
+    if 'without' in lo or 'door' in lo:
+        return 1   # "Depth - Without Door"
+    return 0       # generic depth label
+
+
+def _resolve_depth_variants(
+    dim_specs: list[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    """
+    When multiple single-axis depth labels are present (e.g. "Depth - Without Door"
+    and "Depth - With Door & Handle"), keep only the highest-priority one.
+    Triplet-format labels (WxHxD) are unaffected.
+    """
+    depth_singles = [
+        (i, label, value) for i, (label, value) in enumerate(dim_specs)
+        if re.search(r'\bdepth\b', label, re.IGNORECASE)
+        and not _AXIS_TRIPLET_RE.search(label)
+    ]
+    if len(depth_singles) <= 1:
+        return dim_specs
+    best_idx = max(depth_singles, key=lambda t: _depth_variant_score(t[1]))[0]
+    remove = {i for i, _, _ in depth_singles if i != best_idx}
+    return [(lbl, val) for i, (lbl, val) in enumerate(dim_specs) if i not in remove]
+
+
+# ---------------------------------------------------------------------------
+# Plausibility guard
+# ---------------------------------------------------------------------------
+
+def _apply_plausibility(result: DimensionResult) -> DimensionResult:
+    """
+    Downgrade a Resolved result to Needs Review if any dimension is outside
+    the plausible range for major household appliances (_PLAUSIBLE_MM).
+    Non-Resolved results are returned unchanged.
+    """
+    if result.confidence != 'Resolved':
+        return result
+    lo, hi = _PLAUSIBLE_MM
+    bad = []
+    for name, val in [('Height', result.height), ('Width', result.width), ('Depth', result.depth)]:
+        if val is None:
+            continue
+        try:
+            v = float(val)
+            if not (lo <= v <= hi):
+                bad.append(f'{name}={val}')
+        except (TypeError, ValueError):
+            pass
+    if not bad:
+        return result
+    return DimensionResult(
+        height=result.height,
+        width=result.width,
+        depth=result.depth,
+        confidence='Needs Review',
+        source_url=result.source_url,
+        raw_text=result.raw_text,
+        reason=f'Implausible value(s): {", ".join(bad)} (expected {lo}–{hi}mm)',
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +351,8 @@ def _build_result_from_specs(
         dim_specs,
         key=lambda kv: 0 if _PREFERRED_LABEL_RE.search(kv[0]) else 1,
     )
+    # When multiple depth-variant labels exist, keep only the highest-priority one.
+    dim_specs = _resolve_depth_variants(dim_specs)
 
     h = w = d = None
     raw_parts: list[str] = []
@@ -301,7 +393,7 @@ def _build_result_from_specs(
                 continue
             val_mm = _convert_to_mm(numbers[0], unit)
             for word, axis in _SINGLE_AXIS.items():
-                if word in lo:
+                if re.search(r'\b' + re.escape(word) + r'\b', lo):
                     if axis == 'H':
                         conflict_detected = conflict_detected or (h and h != val_mm)
                         h = h or val_mm
@@ -377,10 +469,14 @@ class LGAdapter(BaseAdapter):
             all_specs.extend(_specs_from_html(soup))
 
             # Filter to dimension-relevant pairs
-            dim_specs = [(k, v) for k, v in all_specs if _DIM_KEYWORD_RE.search(k)]
+            dim_specs = [
+                (k, v) for k, v in all_specs
+                if _DIM_KEYWORD_RE.search(k) or _AXIS_TRIPLET_RE.search(k)
+            ]
 
             if dim_specs:
                 result = _build_result_from_specs(dim_specs, product_url)
+                result = _apply_plausibility(result)
                 if result.confidence == 'Resolved':
                     return result
                 # Partial/ambiguous — try PDF fallback before giving up
@@ -391,7 +487,7 @@ class LGAdapter(BaseAdapter):
             # PDF fallback
             pdf_result = self._try_pdf(soup, product_url)
             if pdf_result and pdf_result.confidence in ('Resolved', 'Needs Review'):
-                return pdf_result
+                return _apply_plausibility(pdf_result)
 
             if partial:
                 return partial   # Return whatever we found on the page
@@ -441,7 +537,10 @@ class LGAdapter(BaseAdapter):
             return None
 
         specs = _specs_from_text(text)
-        dim_specs = [(k, v) for k, v in specs if _DIM_KEYWORD_RE.search(k)]
+        dim_specs = [
+            (k, v) for k, v in specs
+            if _DIM_KEYWORD_RE.search(k) or _AXIS_TRIPLET_RE.search(k)
+        ]
         if not dim_specs:
             return None
 

@@ -1,15 +1,19 @@
 """Unit tests for enricher.py using synthetic openpyxl workbooks.
 
-Tests get_blank_rows and apply_results in isolation — no network calls made.
+Tests get_blank_rows, apply_results, and enrich_workbook in isolation — no network calls made.
 """
 
+import io
 import pytest
+from unittest.mock import patch, MagicMock
+from pathlib import Path
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill
 
 from enricher import (
     get_blank_rows,
     apply_results,
+    enrich_workbook,
     RowSpec,
     COL_BRAND, COL_PRODUCT, COL_H, COL_W, COL_D, COL_LINK, COL_CONF, COL_SRC,
 )
@@ -183,3 +187,74 @@ class TestApplyResults:
         ws = wb[_SHEET]
         assert ws.cell(2, COL_CONF).value == 'Resolved'
         assert ws.cell(2, COL_SRC).value  == link
+
+
+# ---------------------------------------------------------------------------
+# Run Info sheet tests
+# ---------------------------------------------------------------------------
+
+def _wb_bytes(data_rows: list[dict]) -> bytes:
+    """Serialise a workbook built by _make_workbook to raw bytes."""
+    wb = _make_workbook(data_rows)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+class TestRunInfoSheet:
+
+    def test_enrich_workbook_produces_run_info_sheet(self, tmp_path):
+        """enrich_workbook() must create a 'Run Info' sheet in the output workbook."""
+        resolved = DimensionResult(height='454', width='261', depth='328', confidence='Resolved')
+        out = tmp_path / 'out.xlsx'
+
+        with patch('enricher.fetch_for_brand', return_value=resolved), \
+             patch('enricher.dim_cache.should_fetch', return_value=True), \
+             patch('enricher.dim_cache.store_result'):
+            enrich_workbook(_wb_bytes([{'product': 'SKU1', 'link': 'http://example.com/sku1'}]),
+                            out, force_retry=True)
+
+        import openpyxl as xl
+        wb_out = xl.load_workbook(out)
+        assert 'Run Info' in wb_out.sheetnames
+
+        ws = wb_out['Run Info']
+        keys = [ws.cell(r, 1).value for r in range(2, ws.max_row + 1)]
+        assert 'Run Timestamp' in keys
+        assert 'Fresh Fetches' in keys
+        assert 'Cache Hits'    in keys
+        assert 'Resolved'      in keys
+
+    def test_fetch_and_cache_counts_are_correct(self, tmp_path):
+        """Fresh Fetches and Cache Hits must reflect actual fetch vs cache decisions."""
+        resolved  = DimensionResult(height='454', width='261', depth='328', confidence='Resolved')
+        not_found = DimensionResult(confidence='Not Found', reason='No data')
+        out = tmp_path / 'out.xlsx'
+
+        # Row 1: fetched (should_fetch=True for its URL)
+        # Row 2: cache hit (should_fetch=False for its URL, get_cached returns not_found)
+        def _should_fetch(url, force_retry):
+            return 'sku1' in url  # only sku1 triggers a network call
+
+        def _get_cached(url):
+            return not_found
+
+        with patch('enricher.fetch_for_brand', return_value=resolved), \
+             patch('enricher.dim_cache.should_fetch', side_effect=_should_fetch), \
+             patch('enricher.dim_cache.get_cached',  side_effect=_get_cached), \
+             patch('enricher.dim_cache.store_result'):
+            enrich_workbook(
+                _wb_bytes([
+                    {'product': 'SKU1', 'link': 'http://example.com/sku1'},
+                    {'product': 'SKU2', 'link': 'http://example.com/sku2'},
+                ]),
+                out, force_retry=False,
+            )
+
+        import openpyxl as xl
+        ws = xl.load_workbook(out)['Run Info']
+        info = {ws.cell(r, 1).value: ws.cell(r, 2).value
+                for r in range(2, ws.max_row + 1)}
+
+        assert info['Fresh Fetches'] == 1
+        assert info['Cache Hits']    == 1

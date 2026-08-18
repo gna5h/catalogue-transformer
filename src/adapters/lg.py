@@ -57,15 +57,22 @@ _DIM_KEYWORD_RE = re.compile(
     re.IGNORECASE,
 )
 
-# A label refers to cavity / cutout (not overall unit size)
+# A label refers to cavity / cutout / packaging (not overall unit size)
 _CAVITY_RE = re.compile(
-    r'\b(cutout|cut[\s-]out|cavity|recess|installation|opening)\b',
+    r'\b(cutout|cut[\s-]out|cavity|recess|installation|opening|'
+    r'packing|shipping|gross)\b',
     re.IGNORECASE,
 )
 
 # A label refers to overall / net size
 _OVERALL_RE = re.compile(
     r'\b(net|overall|total|product|unit|external|outer)\b',
+    re.IGNORECASE,
+)
+
+# Preferred dimension labels — promoted to front of candidate list
+_PREFERRED_LABEL_RE = re.compile(
+    r'\b(product\s+dimensions?|net\s+dimensions?)\b',
     re.IGNORECASE,
 )
 
@@ -211,6 +218,17 @@ def _specs_from_html(soup: BeautifulSoup) -> list[tuple[str, str]]:
                 value_el.get_text(' ', strip=True),
             ))
 
+    # LG AEM CMS component: c-text-contents spec rows
+    # Structure: div.c-text-contents > strong.cmp-title__text (label) + div.cmp-text (value)
+    for item in soup.find_all(class_=re.compile(r'c-text-contents', re.I)):
+        label_el = item.find(class_='cmp-title__text')
+        value_el = item.find(class_='cmp-text')
+        if label_el and value_el and label_el != value_el:
+            results.append((
+                label_el.get_text(' ', strip=True),
+                value_el.get_text(' ', strip=True),
+            ))
+
     return results
 
 
@@ -237,6 +255,13 @@ def _build_result_from_specs(
     Try to assemble H, W, D from filtered (label, value) dimension pairs.
     Returns a DimensionResult with the appropriate confidence level.
     """
+    # Promote preferred labels (Product/Net Dimensions) to the front so that
+    # "first write wins" fills H/W/D from the most authoritative source first.
+    dim_specs = sorted(
+        dim_specs,
+        key=lambda kv: 0 if _PREFERRED_LABEL_RE.search(kv[0]) else 1,
+    )
+
     h = w = d = None
     raw_parts: list[str] = []
     skipped_cavity: list[str] = []

@@ -150,3 +150,61 @@ class TestLGAdapterParsing:
                 result = self.adapter.fetch_dimensions(_URL)
         assert result.confidence == 'Not Found'
         assert 'RuntimeError' in result.reason
+
+    # 12. Packing dimensions excluded, product dimensions resolved
+    def test_packing_dims_excluded(self):
+        html = _html_with_dl(
+            ('Packing Dimensions (W x H x D) (mm)', '540 x 292 x 386'),
+            ('Product Dimensions (W x H x D) (mm)', '454 x 261 x 328'),
+            ('Cavity Dimension (W x H x D) (mm)',   '317 x 204 x 294'),
+        )
+        with patch('adapters.lg.fetch_url', return_value=_fetch(html)):
+            result = self.adapter.fetch_dimensions(_URL)
+        assert result.confidence == 'Resolved'
+        assert result.width  == '454'
+        assert result.height == '261'
+        assert result.depth  == '328'
+
+    # 13. Duplicate identical product dimensions not treated as conflict
+    def test_duplicate_identical_not_conflict(self):
+        html = _html_with_dl(
+            ('Product Dimensions (W x H x D) (mm)', '454 x 261 x 328'),
+            ('Product Dimensions (W x H x D) (mm)', '454 x 261 x 328'),
+        )
+        with patch('adapters.lg.fetch_url', return_value=_fetch(html)):
+            result = self.adapter.fetch_dimensions(_URL)
+        assert result.confidence == 'Resolved'
+
+    # 14. "Gross Dimensions" excluded (same as packing)
+    def test_gross_dims_excluded(self):
+        html = _html_with_dl(
+            ('Gross Dimensions (W x H x D) (mm)', '550 x 310 x 400'),
+            ('Net Dimensions (W x H x D) (mm)',   '454 x 261 x 328'),
+        )
+        with patch('adapters.lg.fetch_url', return_value=_fetch(html)):
+            result = self.adapter.fetch_dimensions(_URL)
+        assert result.confidence == 'Resolved'
+        assert result.width  == '454'
+        assert result.height == '261'
+        assert result.depth  == '328'
+
+    # 15. LG AEM CMS structure (c-text-contents / cmp-title__text / cmp-text) → Resolved
+    def test_aem_cms_structure_resolved(self):
+        def _aem_item(label: str, value: str) -> str:
+            return (
+                f'<div class="c-text-contents item">'
+                f'<div class="title c-text-contents__headline">'
+                f'<div class="cmp-title"><strong class="cmp-title__text">{label}</strong></div>'
+                f'</div>'
+                f'<div class="text c-text-contents__bodycopy">'
+                f'<div class="cmp-text">{value}</div>'
+                f'</div>'
+                f'</div>'
+            )
+        html = '<html><body>' + _aem_item('Product Dimensions (W x H x D) (mm)', '454 x 261 x 328') + '</body></html>'
+        with patch('adapters.lg.fetch_url', return_value=_fetch(html)):
+            result = self.adapter.fetch_dimensions(_URL)
+        assert result.confidence == 'Resolved'
+        assert result.width  == '454'
+        assert result.height == '261'
+        assert result.depth  == '328'

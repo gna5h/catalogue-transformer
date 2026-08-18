@@ -2,7 +2,7 @@
 
 Public API:
   get_blank_rows(wb)       → list[RowSpec]
-  enrich_rows_iter(rows, force_retry)  → generator of (RowSpec, DimensionResult)
+  enrich_rows_iter(rows, force_retry)  → generator of (RowSpec, DimensionResult, bool)
   apply_results(wb, rows, results)     → modified Workbook
 """
 
@@ -137,29 +137,28 @@ def summarise_blank_rows(rows: list[RowSpec]) -> dict:
 def enrich_rows_iter(
     rows: list[RowSpec],
     force_retry: bool = False,
-) -> Generator[tuple[RowSpec, DimensionResult], None, None]:
+) -> Generator[tuple[RowSpec, DimensionResult, bool], None, None]:
     """
-    Yield (RowSpec, DimensionResult) for each row, one at a time.
+    Yield (RowSpec, DimensionResult, fetched) for each row.
 
-    Checks the cache first; only hits the network when necessary.
-    Use force_retry=True to re-process 'Needs Review' and 'Not Found' rows.
+    fetched=True  → network was used (fresh fetch or first time)
+    fetched=False → result served from cache
     """
     for row in rows:
         if not row.link:
-            result = DimensionResult(
+            yield row, DimensionResult(
                 confidence='Not Found',
                 reason='No product URL available',
-            )
+            ), False
         elif not dim_cache.should_fetch(row.link, force_retry):
-            result = dim_cache.get_cached(row.link) or DimensionResult(
+            yield row, dim_cache.get_cached(row.link) or DimensionResult(
                 confidence='Not Found',
                 reason='Cache miss (unexpected)',
-            )
+            ), False
         else:
             result = fetch_for_brand(row.brand, row.link)
             dim_cache.store_result(row.link, result)
-
-        yield row, result
+            yield row, result, True
 
 
 # ---------------------------------------------------------------------------
@@ -224,6 +223,39 @@ def apply_results(
     return wb
 
 
+def _write_run_info_sheet(wb: Workbook, meta: dict) -> None:
+    """Write a 'Run Info' sheet with run timestamp and fetch/cache counts."""
+    from datetime import datetime, timezone
+    from openpyxl.styles import Font
+
+    sheet_name = 'Run Info'
+    if sheet_name in wb.sheetnames:
+        del wb[sheet_name]
+    ws = wb.create_sheet(sheet_name)
+
+    bold = Font(bold=True)
+    ws.cell(1, 1, 'Key').font   = bold
+    ws.cell(1, 2, 'Value').font = bold
+
+    counts = meta.get('confidence_counts', {})
+    rows = [
+        ('Run Timestamp',  datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')),
+        ('Force Retry',    str(meta.get('force_retry', False))),
+        ('Total Rows',     meta.get('total_rows', 0)),
+        ('Fresh Fetches',  meta.get('fetched_count', 0)),
+        ('Cache Hits',     meta.get('cache_hit_count', 0)),
+        ('Resolved',       counts.get('Resolved', 0)),
+        ('Needs Review',   counts.get('Needs Review', 0)),
+        ('Not Found',      counts.get('Not Found', 0)),
+    ]
+    for i, (key, val) in enumerate(rows, start=2):
+        ws.cell(i, 1, key)
+        ws.cell(i, 2, val)
+
+    ws.column_dimensions['A'].width = 18
+    ws.column_dimensions['B'].width = 24
+
+
 def enrich_workbook(
     input_bytes: bytes,
     output_path: Path,
@@ -246,13 +278,28 @@ def enrich_workbook(
     rows   = get_blank_rows(wb)
     total  = len(rows)
     results: dict[tuple[str, int], DimensionResult] = {}
+    fetched_count = 0
+    cache_hit_count = 0
+    confidence_counts: dict[str, int] = {'Resolved': 0, 'Needs Review': 0, 'Not Found': 0}
 
-    for i, (row, result) in enumerate(enrich_rows_iter(rows, force_retry)):
+    for i, (row, result, fetched) in enumerate(enrich_rows_iter(rows, force_retry)):
         results[(row.sheet, row.row_idx)] = result
+        if fetched:
+            fetched_count += 1
+        else:
+            cache_hit_count += 1
+        confidence_counts[result.confidence] = confidence_counts.get(result.confidence, 0) + 1
         if progress_cb:
             progress_cb(i + 1, total, row, result)
 
     apply_results(wb, rows, results)
+    _write_run_info_sheet(wb, {
+        'force_retry':       force_retry,
+        'total_rows':        total,
+        'fetched_count':     fetched_count,
+        'cache_hit_count':   cache_hit_count,
+        'confidence_counts': confidence_counts,
+    })
     wb.save(output_path)
 
     return rows, results

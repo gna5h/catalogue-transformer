@@ -10,6 +10,14 @@ Convention flag:
   DIMENSION_CONVENTION = "overall"  — use net/overall unit dimensions
   DIMENSION_CONVENTION = "cavity"   — use cutout/installation dimensions
   Change here if eProcess requirements are confirmed to need cavity dims.
+
+Module isolation:
+  All module-level functions (_detect_unit, _convert_to_mm, _parse_axis_order,
+  _parse_numbers, _is_cavity_label, _is_overall_label, _should_use_label,
+  _deep_search_specs, _specs_from_next_data, _specs_from_jsonld, _specs_from_html,
+  _specs_from_text, _build_result_from_specs) are private helpers for LGAdapter
+  only. The underscore prefix is the Python convention for internal use; they are
+  NOT part of any shared adapter API and must not be imported by other modules.
 """
 
 from __future__ import annotations
@@ -42,10 +50,10 @@ _AXIS_TRIPLET_RE = re.compile(
 # Numeric values including ranges: "595", "638-1000"
 _NUMBERS_RE = re.compile(r'\d+(?:\s*[-–]\s*\d+)?')
 
-# A label is dimension-related
+# A label is dimension-related (matches both singular and plural: "Dimension", "Dimensions")
 _DIM_KEYWORD_RE = re.compile(
-    r'\b(net\s+dimension|gross\s+dimension|overall\s+dimension|'
-    r'product\s+dimension|unit\s+dimension|dimension|width|height|depth)\b',
+    r'\b(net\s+dimensions?|gross\s+dimensions?|overall\s+dimensions?|'
+    r'product\s+dimensions?|unit\s+dimensions?|dimensions?|width|height|depth)\b',
     re.IGNORECASE,
 )
 
@@ -64,14 +72,14 @@ _OVERALL_RE = re.compile(
 # Unit tag in a label
 _UNIT_RE = re.compile(r'\((mm|cm|m)\)', re.IGNORECASE)
 
-# Single-axis keywords
+# Single-axis keywords (full words before abbreviations so 'depth' is matched before 'h')
 _SINGLE_AXIS = {
-    'width': 'W',
-    'w':     'W',
+    'width':  'W',
     'height': 'H',
+    'depth':  'D',
+    'w':      'W',
     'h':      'H',
-    'depth': 'D',
-    'd':     'D',
+    'd':      'D',
 }
 
 
@@ -326,57 +334,65 @@ class LGAdapter(BaseAdapter):
 
     # ----------------------------------------------------------------
     def fetch_dimensions(self, product_url: str) -> DimensionResult:
-        html, err = fetch_url(product_url)
-        if html is None:
+        try:
+            html, err = fetch_url(product_url)
+            if html is None:
+                return DimensionResult(
+                    confidence='Not Found',
+                    source_url=product_url,
+                    reason=err or 'fetch failed',
+                )
+
+            soup = BeautifulSoup(html, 'lxml')
+
+            # Collect all (label, value) spec pairs from every source on the page
+            all_specs: list[tuple[str, str]] = []
+            all_specs.extend(_specs_from_next_data(soup))
+            all_specs.extend(_specs_from_jsonld(soup))
+            all_specs.extend(_specs_from_html(soup))
+
+            # Filter to dimension-relevant pairs
+            dim_specs = [(k, v) for k, v in all_specs if _DIM_KEYWORD_RE.search(k)]
+
+            if dim_specs:
+                result = _build_result_from_specs(dim_specs, product_url)
+                if result.confidence == 'Resolved':
+                    return result
+                # Partial/ambiguous — try PDF fallback before giving up
+                partial = result
+            else:
+                partial = None
+
+            # PDF fallback
+            pdf_result = self._try_pdf(soup, product_url)
+            if pdf_result and pdf_result.confidence in ('Resolved', 'Needs Review'):
+                return pdf_result
+
+            if partial:
+                return partial   # Return whatever we found on the page
+
+            # Nothing useful on page or in PDF; check if dim section exists at all
+            if dim_specs:
+                raw = '\n'.join(f'{k}: {v}' for k, v in dim_specs[:8])
+                return DimensionResult(
+                    confidence='Needs Review',
+                    source_url=product_url,
+                    raw_text=raw,
+                    reason='Dimension data present but could not be parsed',
+                )
+
             return DimensionResult(
                 confidence='Not Found',
                 source_url=product_url,
-                reason=err or 'fetch failed',
+                reason='No dimension data found on page or linked PDFs',
             )
-
-        soup = BeautifulSoup(html, 'lxml')
-
-        # Collect all (label, value) spec pairs from every source on the page
-        all_specs: list[tuple[str, str]] = []
-        all_specs.extend(_specs_from_next_data(soup))
-        all_specs.extend(_specs_from_jsonld(soup))
-        all_specs.extend(_specs_from_html(soup))
-
-        # Filter to dimension-relevant pairs
-        dim_specs = [(k, v) for k, v in all_specs if _DIM_KEYWORD_RE.search(k)]
-
-        if dim_specs:
-            result = _build_result_from_specs(dim_specs, product_url)
-            if result.confidence == 'Resolved':
-                return result
-            # Partial/ambiguous — try PDF fallback before giving up
-            partial = result
-        else:
-            partial = None
-
-        # PDF fallback
-        pdf_result = self._try_pdf(soup, product_url)
-        if pdf_result and pdf_result.confidence in ('Resolved', 'Needs Review'):
-            return pdf_result
-
-        if partial:
-            return partial   # Return whatever we found on the page
-
-        # Nothing useful on page or in PDF; check if dim section exists at all
-        if dim_specs:
-            raw = '\n'.join(f'{k}: {v}' for k, v in dim_specs[:8])
+        except Exception as exc:
             return DimensionResult(
-                confidence='Needs Review',
+                confidence='Not Found',
                 source_url=product_url,
-                raw_text=raw,
-                reason='Dimension data present but could not be parsed',
+                reason=f'Unexpected error: {type(exc).__name__}',
+                raw_text=str(exc),
             )
-
-        return DimensionResult(
-            confidence='Not Found',
-            source_url=product_url,
-            reason='No dimension data found on page or linked PDFs',
-        )
 
     # ----------------------------------------------------------------
     def _try_pdf(self, soup: BeautifulSoup, base_url: str) -> Optional[DimensionResult]:

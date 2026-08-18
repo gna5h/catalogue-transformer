@@ -34,4 +34,12 @@ def fetch_for_brand(brand: str, product_url: str) -> DimensionResult:
             source_url=product_url,
             reason=f"No adapter implemented for brand '{brand}'",
         )
-    return adapter.fetch_dimensions(product_url)
+    try:
+        return adapter.fetch_dimensions(product_url)
+    except Exception as exc:
+        return DimensionResult(
+            confidence='Not Found',
+            source_url=product_url,
+            reason=f'Adapter error: {type(exc).__name__}',
+            raw_text=str(exc),
+        )

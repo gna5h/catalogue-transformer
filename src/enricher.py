@@ -28,7 +28,8 @@ import cache as dim_cache
 # Sheet / column constants (from Step 1 writer)
 # ---------------------------------------------------------------------------
 
-M10_SHEETS = ['Microwaves', 'DishWashers', 'Fridges & Freezers', 'Rangehoods', 'Cooktops', 'Ovens']
+M10_SHEETS = ['Microwaves', 'DishWashers', 'Fridges & Freezers', 'Rangehoods', 'Cooktops', 'Ovens',
+              'Washing Machine', 'Dryer']
 
 COL_BRAND   = 1
 COL_PRODUCT = 2

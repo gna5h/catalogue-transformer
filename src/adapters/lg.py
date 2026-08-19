@@ -57,10 +57,13 @@ _DIM_KEYWORD_RE = re.compile(
     re.IGNORECASE,
 )
 
-# A label refers to cavity / cutout / packaging / adjustable features (not overall unit size)
+# A label refers to cavity / cutout / packaging / adjustable features, or a
+# clearance measurement (door-open swing, back-cover-to-door distance) — not
+# the product's own footprint.
 _CAVITY_RE = re.compile(
     r'\b(cutout|cut[\s-]out|cavity|recess|installation|opening|'
-    r'pack(?:ing|aging)|shipping|gross|adjustable)\b',
+    r'pack(?:ing|aging)|shipping|gross|adjustable|'
+    r'clearance|door\s+open|back\s+cover)\b',
     re.IGNORECASE,
 )
 
@@ -124,7 +127,10 @@ def _parse_axis_order(label: str) -> list[str]:
 
 
 def _parse_numbers(value: str) -> list[str]:
-    return _NUMBERS_RE.findall(value.replace(',', ''))
+    # Normalise zero-space dimension triplets like "600x850x550": replace x/×
+    # between digits with a space so each value is extracted cleanly.
+    normalised = re.sub(r'(?<=\d)[x×X](?=\d)', ' ', value.replace(',', ''))
+    return _NUMBERS_RE.findall(normalised)
 
 
 def _is_cavity_label(label: str) -> bool:
@@ -140,8 +146,10 @@ def _should_use_label(label: str) -> bool:
     is_cavity  = _is_cavity_label(label)
     is_overall = _is_overall_label(label)
     if DIMENSION_CONVENTION == 'overall':
-        # Prefer overall; skip pure cavity labels
-        if is_cavity and not is_overall:
+        # Skip any cavity/clearance label even when it also contains an "overall"
+        # keyword (e.g. "Product Depth with door open 90˚" has "product" but is
+        # not the product's own footprint — it is a door-swing clearance value).
+        if is_cavity:
             return False
     elif DIMENSION_CONVENTION == 'cavity':
         if is_overall and not is_cavity:

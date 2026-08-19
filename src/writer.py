@@ -10,7 +10,8 @@ _AMBER_FILL = PatternFill(start_color='FFECB3', end_color='FFECB3', fill_type='s
 _BOLD = Font(bold=True)
 
 # Fixed sheet order required by M10
-M10_SHEETS = ['Microwaves', 'DishWashers', 'Fridges & Freezers', 'Rangehoods', 'Cooktops', 'Ovens']
+M10_SHEETS = ['Microwaves', 'DishWashers', 'Fridges & Freezers', 'Rangehoods', 'Cooktops', 'Ovens',
+              'Washing Machine', 'Dryer']
 
 _OUT_COLS = ['Brand', 'Product', 'Height', 'Width', 'Depth', 'Link']
 _DIM_COL_INDICES = {3, 4, 5}   # 1-indexed column positions for H / W / D

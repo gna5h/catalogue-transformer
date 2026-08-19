@@ -139,6 +139,28 @@
       ],
       "m10_sheet": "Fridges & Freezers",
       "block": "Beverage Fridge"
+    },
+    {
+      "_comment": "WASHING MACHINE — front-load",
+      "product_group": "Laundry",
+      "subcategory_contains": ["Front Load Washer"],
+      "m10_sheet": "Washing Machine",
+      "block": "Front Load"
+    },
+    {
+      "_comment": "WASHING MACHINE — top-load",
+      "product_group": "Laundry",
+      "subcategory_contains": ["Top Load Washer"],
+      "m10_sheet": "Washing Machine",
+      "block": "Top Load"
+    },
+    {
+      "_comment": "DRYER — all dryer types. subcategory_not_contains guards against 'Washer Dryer Combo'.",
+      "product_group": "Laundry",
+      "subcategory_contains": ["Dryer"],
+      "subcategory_not_contains": ["Washer Dryer"],
+      "m10_sheet": "Dryer",
+      "block": "Dryer"
     }
   ]
 }

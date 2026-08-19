@@ -108,6 +108,11 @@ def apply_mapping(
         matched = (not sub_matches) or _contains_any(subcategory, sub_matches)
 
         if matched:
+            sub_excludes = rule.get('subcategory_not_contains', [])
+            if sub_excludes and _contains_any(subcategory, sub_excludes):
+                matched = False
+
+        if matched:
             block = _resolve_block(rule['block'], subcategory)
             return rule['m10_sheet'], block, None
 

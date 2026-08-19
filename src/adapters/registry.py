@@ -9,11 +9,13 @@ from .base import BaseAdapter, DimensionResult
 from .lg import LGAdapter
 from .bosch import BoschAdapter
 from .samsung import SamsungAdapter
+from .fp import FPAdapter
 
 ADAPTERS: dict[str, BaseAdapter] = {
-    'lg':       LGAdapter(),
-    'bosch':    BoschAdapter(),
-    'samsung':  SamsungAdapter(),
+    'lg':               LGAdapter(),
+    'bosch':            BoschAdapter(),
+    'samsung':          SamsungAdapter(),
+    'fisher & paykel':  FPAdapter(),
 }
 
 

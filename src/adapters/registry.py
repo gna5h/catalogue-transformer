@@ -10,12 +10,14 @@ from .lg import LGAdapter
 from .bosch import BoschAdapter
 from .samsung import SamsungAdapter
 from .fp import FPAdapter
+from .haier import HaierAdapter
 
 ADAPTERS: dict[str, BaseAdapter] = {
     'lg':               LGAdapter(),
     'bosch':            BoschAdapter(),
     'samsung':          SamsungAdapter(),
     'fisher & paykel':  FPAdapter(),
+    'haier':            HaierAdapter(),
 }
 
 

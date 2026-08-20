@@ -34,6 +34,11 @@ def _connect() -> sqlite3.Connection:
             fetched_at   TEXT
         )
     """)
+    # Schema migration: add image columns to existing databases
+    existing_cols = {row[1] for row in conn.execute('PRAGMA table_info(dim_cache)')}
+    for col_def in ('image_bytes BLOB', 'image_status TEXT'):
+        if col_def.split()[0] not in existing_cols:
+            conn.execute(f'ALTER TABLE dim_cache ADD COLUMN {col_def}')
     conn.commit()
     return conn
 
@@ -48,7 +53,8 @@ def get_cached(url: str) -> Optional[DimensionResult]:
     conn = _connect()
     try:
         row = conn.execute(
-            "SELECT confidence, height, width, depth, source_url, raw_text, reason "
+            "SELECT confidence, height, width, depth, source_url, raw_text, reason, "
+            "image_bytes, image_status "
             "FROM dim_cache WHERE url = ?",
             (key,)
         ).fetchone()
@@ -60,12 +66,14 @@ def get_cached(url: str) -> Optional[DimensionResult]:
 
     return DimensionResult(
         confidence=row[0],
-        height=row[1] or None,
-        width=row[2]  or None,
-        depth=row[3]  or None,
+        height=row[1]     or None,
+        width=row[2]      or None,
+        depth=row[3]      or None,
         source_url=row[4] or '',
         raw_text=row[5]   or '',
         reason=row[6]     or '',
+        image_bytes=row[7],
+        image_status=row[8] or 'Not Found',
     )
 
 
@@ -76,8 +84,9 @@ def store_result(url: str, result: DimensionResult) -> None:
     try:
         conn.execute("""
             INSERT OR REPLACE INTO dim_cache
-              (url, confidence, height, width, depth, source_url, raw_text, reason, fetched_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              (url, confidence, height, width, depth, source_url, raw_text, reason, fetched_at,
+               image_bytes, image_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             key,
             result.confidence,
@@ -88,6 +97,8 @@ def store_result(url: str, result: DimensionResult) -> None:
             result.raw_text,
             result.reason,
             datetime.now(timezone.utc).isoformat(),
+            result.image_bytes,
+            result.image_status,
         ))
         conn.commit()
     finally:

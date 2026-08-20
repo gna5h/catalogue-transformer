@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 
 import requests
 
@@ -24,13 +24,22 @@ class DimensionResult:
       'Needs Review' — partial or ambiguous data found; see raw_text
       'Not Found'    — nothing useful located
     """
-    height:     Optional[str] = None
-    width:      Optional[str] = None
-    depth:      Optional[str] = None
-    confidence: str = 'Not Found'
-    source_url: str = ''
-    raw_text:   str = ''   # raw spec snippet for audit / debugging
-    reason:     str = ''   # human-readable explanation for non-Resolved outcomes
+    height:       Optional[str]   = None
+    width:        Optional[str]   = None
+    depth:        Optional[str]   = None
+    confidence:   str             = 'Not Found'
+    source_url:   str             = ''
+    raw_text:     str             = ''   # raw spec snippet for audit / debugging
+    reason:       str             = ''   # human-readable explanation for non-Resolved outcomes
+    image_bytes:  Optional[bytes] = None # JPEG thumbnail bytes, or None
+    image_status: str             = 'Not Found'  # 'Embedded' | 'Not Found' | 'Download Failed'
+
+
+@dataclass
+class ImageResult:
+    """Outcome of a single image extraction attempt."""
+    image_bytes: Optional[bytes] = None
+    status:      str             = 'Not Found'  # 'Embedded' | 'Not Found' | 'Download Failed'
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +97,54 @@ def fetch_url(url: str, *, binary: bool = False) -> tuple[Optional[bytes | str],
     if binary:
         return resp.content, ''
     return resp.text, ''
+
+
+def extract_and_prepare_image(html: str, base_url: str) -> ImageResult:
+    """
+    Parse og:image from already-fetched page HTML, download and resize to a
+    JPEG thumbnail (~180px on the longer edge).
+
+    Never raises — returns ImageResult with status='Not Found' or
+    'Download Failed' on any failure.
+    Reuses the shared fetch_url rate-limiter for the image download.
+    """
+    try:
+        from bs4 import BeautifulSoup
+        from io import BytesIO
+        from PIL import Image as PILImage
+
+        soup = BeautifulSoup(html, 'lxml')
+        og_tag = soup.find('meta', attrs={'property': 'og:image'})
+        if og_tag is None:
+            return ImageResult(status='Not Found')
+
+        img_url = (og_tag.get('content') or '').strip()
+        if not img_url:
+            return ImageResult(status='Not Found')
+
+        # Normalise protocol-relative and root-relative URLs
+        if img_url.startswith('//'):
+            img_url = 'https:' + img_url
+        elif not img_url.startswith('http'):
+            img_url = urljoin(base_url, img_url)
+
+        img_data, _err = fetch_url(img_url, binary=True)
+        if img_data is None:
+            return ImageResult(status='Download Failed')
+
+        img = PILImage.open(BytesIO(img_data)).convert('RGB')
+        max_px = 180
+        w, h = img.size
+        ratio = min(max_px / w, max_px / h)
+        if ratio < 1.0:
+            img = img.resize((int(w * ratio), int(h * ratio)), PILImage.LANCZOS)
+
+        buf = BytesIO()
+        img.save(buf, format='JPEG', quality=85)
+        return ImageResult(image_bytes=buf.getvalue(), status='Embedded')
+
+    except Exception:
+        return ImageResult(status='Download Failed')
 
 
 # ---------------------------------------------------------------------------

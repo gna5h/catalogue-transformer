@@ -30,7 +30,7 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
-from .base import BaseAdapter, DimensionResult, fetch_url
+from .base import BaseAdapter, DimensionResult, fetch_url, extract_and_prepare_image
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -467,54 +467,12 @@ class LGAdapter(BaseAdapter):
                     source_url=product_url,
                     reason=err or 'fetch failed',
                 )
-
             soup = BeautifulSoup(html, 'lxml')
-
-            # Collect all (label, value) spec pairs from every source on the page
-            all_specs: list[tuple[str, str]] = []
-            all_specs.extend(_specs_from_next_data(soup))
-            all_specs.extend(_specs_from_jsonld(soup))
-            all_specs.extend(_specs_from_html(soup))
-
-            # Filter to dimension-relevant pairs
-            dim_specs = [
-                (k, v) for k, v in all_specs
-                if _DIM_KEYWORD_RE.search(k) or _AXIS_TRIPLET_RE.search(k)
-            ]
-
-            if dim_specs:
-                result = _build_result_from_specs(dim_specs, product_url)
-                result = _apply_plausibility(result)
-                if result.confidence == 'Resolved':
-                    return result
-                # Partial/ambiguous — try PDF fallback before giving up
-                partial = result
-            else:
-                partial = None
-
-            # PDF fallback
-            pdf_result = self._try_pdf(soup, product_url)
-            if pdf_result and pdf_result.confidence in ('Resolved', 'Needs Review'):
-                return _apply_plausibility(pdf_result)
-
-            if partial:
-                return partial   # Return whatever we found on the page
-
-            # Nothing useful on page or in PDF; check if dim section exists at all
-            if dim_specs:
-                raw = '\n'.join(f'{k}: {v}' for k, v in dim_specs[:8])
-                return DimensionResult(
-                    confidence='Needs Review',
-                    source_url=product_url,
-                    raw_text=raw,
-                    reason='Dimension data present but could not be parsed',
-                )
-
-            return DimensionResult(
-                confidence='Not Found',
-                source_url=product_url,
-                reason='No dimension data found on page or linked PDFs',
-            )
+            result = self._find_dimensions(soup, product_url)
+            img = extract_and_prepare_image(html, product_url)
+            result.image_bytes  = img.image_bytes
+            result.image_status = img.status
+            return result
         except Exception as exc:
             return DimensionResult(
                 confidence='Not Found',
@@ -522,6 +480,55 @@ class LGAdapter(BaseAdapter):
                 reason=f'Unexpected error: {type(exc).__name__}',
                 raw_text=str(exc),
             )
+
+    # ----------------------------------------------------------------
+    def _find_dimensions(self, soup: BeautifulSoup, product_url: str) -> DimensionResult:
+        """Extract H/W/D from the already-parsed soup. Never raises."""
+        # Collect all (label, value) spec pairs from every source on the page
+        all_specs: list[tuple[str, str]] = []
+        all_specs.extend(_specs_from_next_data(soup))
+        all_specs.extend(_specs_from_jsonld(soup))
+        all_specs.extend(_specs_from_html(soup))
+
+        # Filter to dimension-relevant pairs
+        dim_specs = [
+            (k, v) for k, v in all_specs
+            if _DIM_KEYWORD_RE.search(k) or _AXIS_TRIPLET_RE.search(k)
+        ]
+
+        if dim_specs:
+            result = _build_result_from_specs(dim_specs, product_url)
+            result = _apply_plausibility(result)
+            if result.confidence == 'Resolved':
+                return result
+            # Partial/ambiguous — try PDF fallback before giving up
+            partial = result
+        else:
+            partial = None
+
+        # PDF fallback
+        pdf_result = self._try_pdf(soup, product_url)
+        if pdf_result and pdf_result.confidence in ('Resolved', 'Needs Review'):
+            return _apply_plausibility(pdf_result)
+
+        if partial:
+            return partial   # Return whatever we found on the page
+
+        # Nothing useful on page or in PDF; check if dim section exists at all
+        if dim_specs:
+            raw = '\n'.join(f'{k}: {v}' for k, v in dim_specs[:8])
+            return DimensionResult(
+                confidence='Needs Review',
+                source_url=product_url,
+                raw_text=raw,
+                reason='Dimension data present but could not be parsed',
+            )
+
+        return DimensionResult(
+            confidence='Not Found',
+            source_url=product_url,
+            reason='No dimension data found on page or linked PDFs',
+        )
 
     # ----------------------------------------------------------------
     def _try_pdf(self, soup: BeautifulSoup, base_url: str) -> Optional[DimensionResult]:

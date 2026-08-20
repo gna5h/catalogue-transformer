@@ -17,7 +17,7 @@ from typing import Optional
 
 from bs4 import BeautifulSoup
 
-from .base import BaseAdapter, DimensionResult, fetch_url
+from .base import BaseAdapter, DimensionResult, fetch_url, extract_and_prepare_image
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -191,9 +191,15 @@ class HaierAdapter(BaseAdapter):
             for strategy in (_from_dim_table, _from_free_text):
                 result = strategy(soup, product_url)
                 if result is not None:
-                    return _apply_plausibility(result)
-            return DimensionResult(confidence='Not Found', source_url=product_url,
-                                   reason='No dimension data found on page')
+                    result = _apply_plausibility(result)
+                    break
+            else:
+                result = DimensionResult(confidence='Not Found', source_url=product_url,
+                                         reason='No dimension data found on page')
+            img = extract_and_prepare_image(html, product_url)
+            result.image_bytes  = img.image_bytes
+            result.image_status = img.status
+            return result
         except Exception as exc:
             return DimensionResult(confidence='Not Found', source_url=product_url,
                                    reason=f'Unexpected error: {type(exc).__name__}',

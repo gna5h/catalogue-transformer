@@ -13,8 +13,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Generator
 
+from io import BytesIO
+
 import openpyxl
 from openpyxl import Workbook
+from openpyxl.drawing.image import Image as XLImage
 from openpyxl.styles import PatternFill
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -31,14 +34,16 @@ import cache as dim_cache
 M10_SHEETS = ['Microwaves', 'DishWashers', 'Fridges & Freezers', 'Rangehoods', 'Cooktops', 'Ovens',
               'Washing Machine', 'Dryer']
 
-COL_BRAND   = 1
-COL_PRODUCT = 2
-COL_H       = 3
-COL_W       = 4
-COL_D       = 5
-COL_LINK    = 6
-COL_CONF    = 7   # Dimension Confidence
-COL_SRC     = 8   # Dimension Source
+COL_BRAND      = 1
+COL_PRODUCT    = 2
+COL_H          = 3
+COL_W          = 4
+COL_D          = 5
+COL_LINK       = 6
+COL_CONF       = 7   # Dimension Confidence
+COL_SRC        = 8   # Dimension Source
+COL_IMG        = 9   # Image (embedded thumbnail)
+COL_IMG_STATUS = 10  # Image Status
 
 _AMBER_FILL = PatternFill(start_color='FFECB3', end_color='FFECB3', fill_type='solid')
 _NO_FILL    = PatternFill(fill_type=None)
@@ -168,8 +173,8 @@ def enrich_rows_iter(
 
 def _ensure_confidence_headers(ws) -> None:
     """
-    Add 'Dimension Confidence' and 'Dimension Source' to every header row
-    in the sheet, if not already present.
+    Add enrichment column headers to every header row in the sheet,
+    if not already present.
     """
     from openpyxl.styles import Font
     bold = Font(bold=True)
@@ -181,6 +186,11 @@ def _ensure_confidence_headers(ws) -> None:
                 cell_s = ws.cell(row_idx, COL_SRC,  value='Dimension Source')
                 cell_c.font = bold
                 cell_s.font = bold
+            if not ws.cell(row_idx, COL_IMG_STATUS).value:
+                cell_i  = ws.cell(row_idx, COL_IMG,        value='Image')
+                cell_is = ws.cell(row_idx, COL_IMG_STATUS, value='Image Status')
+                cell_i.font  = bold
+                cell_is.font = bold
 
 
 def apply_results(
@@ -220,6 +230,17 @@ def apply_results(
         # Confidence + Source
         ws.cell(row.row_idx, COL_CONF).value = result.confidence
         ws.cell(row.row_idx, COL_SRC ).value = result.source_url
+
+        # Image thumbnail
+        if result.image_bytes:
+            xl_img = XLImage(BytesIO(result.image_bytes))
+            xl_img.anchor = f'I{row.row_idx}'
+            ws.add_image(xl_img)
+            ws.row_dimensions[row.row_idx].height = 135
+            ws.column_dimensions['I'].width = 23
+
+        # Image Status
+        ws.cell(row.row_idx, COL_IMG_STATUS).value = result.image_status or 'Not Found'
 
     return wb
 

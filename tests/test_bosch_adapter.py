@@ -145,3 +145,59 @@ class TestBoschAdapterParsing:
                 result = adapter.fetch_dimensions(URL)
         assert result.confidence == 'Not Found'
         assert 'RuntimeError' in result.reason
+
+
+# ---------------------------------------------------------------------------
+# BoschAdapter.get_image_url
+# ---------------------------------------------------------------------------
+
+_SHOT_PRIMARY = 'https://media3.bsh-group.com/Product_Shots/21577869_TEST123_STP_def.webp'
+_SHOT_SECONDARY = 'https://media3.bsh-group.com/Product_Shots/26376459_TEST123_def.webp'
+_LINE_DRAWING = 'https://media3.bsh-group.com/Line_Drawings/17189134_Side_View.webp'
+_IMAGES_PATH = 'https://media3.bsh-group.com/Images/25973719_Feature_en-NZ.webp'
+_OG_IMAGE = 'https://media3.bsh-group.com/Product_Shots/og_image.webp'
+
+
+def _html_jsonld(*image_urls: str, og_content: str = '') -> str:
+    images_json = ', '.join(f'"{u}"' for u in image_urls)
+    og_tag = f'<meta property="og:image" content="{og_content}" />' if og_content else ''
+    return (
+        f'<html><head>{og_tag}'
+        f'<script type="application/ld+json">'
+        f'{{"@type": "Product", "image": [{images_json}]}}'
+        f'</script>'
+        f'</head><body></body></html>'
+    )
+
+
+class TestBoschAdapterGetImageUrl:
+
+    def test_jsonld_first_product_shot_returned(self):
+        """JSON-LD image[0] is Product_Shots → returned as primary image."""
+        html = _html_jsonld(_SHOT_PRIMARY, _SHOT_SECONDARY, _LINE_DRAWING, og_content=_OG_IMAGE)
+        result = adapter.get_image_url(html, URL)
+        assert result == _SHOT_PRIMARY
+
+    def test_jsonld_skips_line_drawings_finds_product_shot(self):
+        """Line_Drawings entries come before Product_Shots → skipped; Product_Shots returned."""
+        html = _html_jsonld(_LINE_DRAWING, _SHOT_PRIMARY, og_content=_OG_IMAGE)
+        result = adapter.get_image_url(html, URL)
+        assert result == _SHOT_PRIMARY
+
+    def test_jsonld_skips_images_path_takes_product_shots(self):
+        """Images/ lifestyle entries skipped; Product_Shots returned."""
+        html = _html_jsonld(_IMAGES_PATH, _SHOT_PRIMARY, og_content=_OG_IMAGE)
+        result = adapter.get_image_url(html, URL)
+        assert result == _SHOT_PRIMARY
+
+    def test_no_jsonld_falls_back_to_og_image(self):
+        """No JSON-LD on page → inherited og:image behaviour used."""
+        html = f'<html><head><meta property="og:image" content="{_OG_IMAGE}" /></head><body></body></html>'
+        result = adapter.get_image_url(html, URL)
+        assert result == _OG_IMAGE
+
+    def test_no_product_shots_in_jsonld_falls_back_to_og_image(self):
+        """JSON-LD has only Line_Drawings entries → falls back to og:image."""
+        html = _html_jsonld(_LINE_DRAWING, og_content=_OG_IMAGE)
+        result = adapter.get_image_url(html, URL)
+        assert result == _OG_IMAGE

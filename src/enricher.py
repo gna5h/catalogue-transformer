@@ -164,13 +164,13 @@ def enrich_rows_iter(
             ), False, False
             continue
 
-        need_dims = dim_cache.should_fetch_dims(row.link, force_retry)
-        need_img  = dim_cache.should_fetch_image(row.link)
+        need_dims = dim_cache.should_fetch_dims(row.link, force_retry, row.brand)
+        need_img  = dim_cache.should_fetch_image(row.link, row.brand)
 
         if need_dims:
             # Full adapter call: fetches HTML, extracts dimensions + image together
             result = fetch_for_brand(row.brand, row.link)
-            dim_cache.store_result(row.link, result)
+            dim_cache.store_result(row.link, result, row.brand)
             yield row, result, True, True
 
         elif need_img:
@@ -188,7 +188,7 @@ def enrich_rows_iter(
                     img = ImageResult(status='Not Found')
                 cached.image_bytes  = img.image_bytes
                 cached.image_status = img.status
-            dim_cache.store_result(row.link, cached)
+            dim_cache.store_result(row.link, cached, row.brand)
             yield row, cached, False, True
 
         else:

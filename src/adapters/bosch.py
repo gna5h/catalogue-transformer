@@ -17,6 +17,7 @@ support is not in scope for this pass.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Optional
 
@@ -127,6 +128,33 @@ def _from_technical_overview(soup: BeautifulSoup, url: str) -> Optional[Dimensio
 
 class BoschAdapter(BaseAdapter):
     brand_name = 'Bosch'
+
+    def get_image_url(self, html: str, page_url: str) -> Optional[str]:
+        """Bosch: first Product_Shots entry from JSON-LD schema, not og:image.
+
+        og:image consistently points to gallery position 2 on Bosch NZ, not the
+        primary product shot. The JSON-LD Product.image array lists the primary
+        shot first among Product_Shots entries.
+        Filters out /Line_Drawings/ and /Images/ paths which appear in the same array.
+        Falls back to the inherited og:image behaviour if JSON-LD is absent or
+        contains no Product_Shots entries.
+        """
+        soup = BeautifulSoup(html, 'lxml')
+        for script in soup.find_all('script', type='application/ld+json'):
+            try:
+                data = json.loads(script.string or '')
+            except (json.JSONDecodeError, AttributeError):
+                continue
+            if not (isinstance(data, dict) and data.get('@type') == 'Product'):
+                continue
+            images = data.get('image', [])
+            if isinstance(images, str):
+                images = [images]
+            for img_url in images:
+                if isinstance(img_url, str) and '/Product_Shots/' in img_url:
+                    return img_url
+        # No usable JSON-LD entry found — fall back to og:image
+        return super().get_image_url(html, page_url)
 
     def fetch_dimensions(self, product_url: str) -> DimensionResult:
         try:

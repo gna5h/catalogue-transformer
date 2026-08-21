@@ -235,7 +235,7 @@ class TestRunInfoSheet:
 
         # Row 1 (sku1): needs dim fetch  → adapter called → dim_fetched=True, img_fetched=True
         # Row 2 (sku2): dims + image done → pure cache hit → dim_fetched=False, img_fetched=False
-        def _should_fetch_dims(url, force_retry):
+        def _should_fetch_dims(url, force_retry, brand=''):
             return 'sku1' in url
 
         def _get_cached(url):

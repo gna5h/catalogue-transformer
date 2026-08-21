@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from collections import defaultdict
 from dataclasses import dataclass
@@ -99,36 +100,62 @@ def fetch_url(url: str, *, binary: bool = False) -> tuple[Optional[bytes | str],
     return resp.text, ''
 
 
-def extract_and_prepare_image(html: str, base_url: str) -> ImageResult:
-    """
-    Parse og:image from already-fetched page HTML, download and resize to a
-    JPEG thumbnail (~180px on the longer edge).
+# ---------------------------------------------------------------------------
+# Image URL helpers (shared across adapters)
+# ---------------------------------------------------------------------------
 
-    Never raises — returns ImageResult with status='Not Found' or
-    'Download Failed' on any failure.
-    Reuses the shared fetch_url rate-limiter for the image download.
+
+def is_valid_single_url(value: str) -> bool:
+    """Return True if value is a single well-formed URL, not two URLs concatenated.
+
+    Detects the Salesforce Commerce Cloud Demandware template bug where the
+    og:image content is a root-relative or absolute path with a second absolute
+    URL appended directly:
+      /on/demandware.static/.../https://cdn.example.com/img.jpg   (F&P pattern)
+      https://site.com/on/demandware.../https://cdn.../img.jpg    (Haier pattern)
+    """
+    stripped = (value or '').strip()
+    if not stripped:
+        return False
+    count = len(re.findall(r'https?://', stripped))
+    if count > 1:
+        return False
+    # A root-relative path (/foo) that contains a scheme is a concatenation bug
+    if count == 1 and not stripped.startswith('http') and not stripped.startswith('//'):
+        return False
+    return True
+
+
+def normalise_image_url(raw: str, base_url: str) -> str:
+    """Resolve a protocol-relative or root-relative URL to absolute."""
+    if raw.startswith('//'):
+        return 'https:' + raw
+    if not raw.startswith('http'):
+        return urljoin(base_url, raw)
+    return raw
+
+
+def get_og_image_url(html: str) -> Optional[str]:
+    """Extract the og:image meta content value from page HTML, or None if absent."""
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html, 'lxml')
+    tag = soup.find('meta', attrs={'property': 'og:image'})
+    if tag is None:
+        return None
+    return (tag.get('content') or '').strip() or None
+
+
+def prepare_image(image_url: str) -> ImageResult:
+    """Download image_url, resize to ~180px on the longer edge, re-encode as JPEG.
+
+    Never raises — returns Download Failed on any error.
+    Reuses the shared fetch_url rate-limiter for the download.
     """
     try:
-        from bs4 import BeautifulSoup
         from io import BytesIO
         from PIL import Image as PILImage
 
-        soup = BeautifulSoup(html, 'lxml')
-        og_tag = soup.find('meta', attrs={'property': 'og:image'})
-        if og_tag is None:
-            return ImageResult(status='Not Found')
-
-        img_url = (og_tag.get('content') or '').strip()
-        if not img_url:
-            return ImageResult(status='Not Found')
-
-        # Normalise protocol-relative and root-relative URLs
-        if img_url.startswith('//'):
-            img_url = 'https:' + img_url
-        elif not img_url.startswith('http'):
-            img_url = urljoin(base_url, img_url)
-
-        img_data, _err = fetch_url(img_url, binary=True)
+        img_data, _err = fetch_url(image_url, binary=True)
         if img_data is None:
             return ImageResult(status='Download Failed')
 
@@ -167,6 +194,17 @@ class BaseAdapter:
         Must never raise — always returns a DimensionResult.
         """
         raise NotImplementedError
+
+    def get_image_url(self, html: str, page_url: str) -> Optional[str]:
+        """Return the best candidate image URL from already-fetched page HTML, or None.
+
+        Default: og:image meta tag, normalised to an absolute URL.
+        Override in adapters where og:image is absent or malformed.
+        """
+        raw = get_og_image_url(html)
+        if not raw:
+            return None
+        return normalise_image_url(raw, page_url)
 
 
 class StubAdapter(BaseAdapter):

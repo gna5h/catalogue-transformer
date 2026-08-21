@@ -23,8 +23,8 @@ from openpyxl.styles import PatternFill
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent / 'adapters'))
 
-from adapters.base import DimensionResult, fetch_url, extract_and_prepare_image
-from adapters.registry import fetch_for_brand
+from adapters.base import DimensionResult, fetch_url, ImageResult, prepare_image
+from adapters.registry import fetch_for_brand, get_adapter
 import cache as dim_cache
 
 # ---------------------------------------------------------------------------
@@ -180,7 +180,12 @@ def enrich_rows_iter(
                 confidence='Not Found', reason='Cache miss (unexpected)')
             html, _err = fetch_url(row.link)
             if html:
-                img = extract_and_prepare_image(html, row.link)
+                adapter = get_adapter(row.brand)
+                img_url = adapter.get_image_url(html, row.link) if adapter else None
+                if img_url:
+                    img = prepare_image(img_url)
+                else:
+                    img = ImageResult(status='Not Found')
                 cached.image_bytes  = img.image_bytes
                 cached.image_status = img.status
             dim_cache.store_result(row.link, cached)

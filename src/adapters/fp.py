@@ -12,7 +12,9 @@ from typing import Optional
 
 from bs4 import BeautifulSoup
 
-from .base import BaseAdapter, DimensionResult, fetch_url, extract_and_prepare_image
+from .base import (BaseAdapter, DimensionResult, fetch_url,
+                   ImageResult, prepare_image, is_valid_single_url, normalise_image_url,
+                   get_og_image_url)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -169,6 +171,24 @@ def _assemble(
 class FPAdapter(BaseAdapter):
     brand_name = 'Fisher & Paykel'
 
+    def get_image_url(self, html: str, page_url: str) -> Optional[str]:
+        """F&P: validate og:image (Demandware concatenation bug); fall back to gallery."""
+        # og:image first — but only if it's a well-formed single URL
+        raw = get_og_image_url(html)
+        if raw and is_valid_single_url(raw):
+            return normalise_image_url(raw, page_url)
+
+        # Fallback: main product shot identified by alt text ending with ", pdp"
+        soup = BeautifulSoup(html, 'lxml')
+        for img_tag in soup.find_all('img'):
+            alt = (img_tag.get('alt') or '').strip()
+            if alt.lower().endswith(', pdp'):
+                src = (img_tag.get('src') or img_tag.get('data-src') or '').strip()
+                if src:
+                    return normalise_image_url(src, page_url)
+
+        return None
+
     def fetch_dimensions(self, product_url: str) -> DimensionResult:
         try:
             html, err = fetch_url(product_url)
@@ -184,7 +204,8 @@ class FPAdapter(BaseAdapter):
             else:
                 result = DimensionResult(confidence='Not Found', source_url=product_url,
                                          reason='No dimension data found on page')
-            img = extract_and_prepare_image(html, product_url)
+            img_url = self.get_image_url(html, product_url)
+            img = prepare_image(img_url) if img_url else ImageResult(status='Not Found')
             result.image_bytes  = img.image_bytes
             result.image_status = img.status
             return result

@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from adapters.fp import FPAdapter
-from adapters.base import DimensionResult
+from adapters.base import DimensionResult, is_valid_single_url
 
 URL = 'https://www.fisherpaykel.com/nz/test-product.html'
 
@@ -139,3 +139,95 @@ class TestFPAdapterParsing:
                 result = adapter.fetch_dimensions(URL)
         assert result.confidence == 'Not Found'
         assert 'RuntimeError' in result.reason
+
+
+# ---------------------------------------------------------------------------
+# is_valid_single_url
+# ---------------------------------------------------------------------------
+
+
+class TestIsValidSingleUrl:
+
+    def test_valid_https_url_returns_true(self):
+        assert is_valid_single_url('https://cdn.example.com/img.jpg') is True
+
+    def test_valid_protocol_relative_returns_true(self):
+        assert is_valid_single_url('//cdn.example.com/img.jpg') is True
+
+    def test_demandware_root_relative_concatenated_returns_false(self):
+        """Root-relative path with an embedded https:// — Demandware F&P pattern."""
+        assert is_valid_single_url(
+            '/on/demandware.static/-/Sites/en_NZ/https://cdn.example.com/img.jpg'
+        ) is False
+
+    def test_demandware_absolute_concatenated_returns_false(self):
+        """Two https:// schemes in one value — Demandware Haier pattern."""
+        assert is_valid_single_url(
+            'https://site.com/on/demandware.static/https://cdn.example.com/img.jpg'
+        ) is False
+
+    def test_empty_string_returns_false(self):
+        assert is_valid_single_url('') is False
+
+
+# ---------------------------------------------------------------------------
+# FPAdapter.get_image_url
+# ---------------------------------------------------------------------------
+
+
+def _html_og(content: str) -> str:
+    return (
+        f'<html><head>'
+        f'<meta property="og:image" content="{content}" />'
+        f'</head><body></body></html>'
+    )
+
+
+def _html_pdp(src: str, alt: str = 'DW60XT4B2, pdp') -> str:
+    return (
+        f'<html><head></head><body>'
+        f'<img src="{src}" alt="{alt}" />'
+        f'</body></html>'
+    )
+
+
+def _html_og_and_pdp(og_content: str, pdp_src: str) -> str:
+    return (
+        f'<html><head>'
+        f'<meta property="og:image" content="{og_content}" />'
+        f'</head><body>'
+        f'<img src="{pdp_src}" alt="DW60XT4B2, pdp" />'
+        f'</body></html>'
+    )
+
+
+class TestFPAdapterGetImageUrl:
+
+    def test_valid_og_image_used_directly(self):
+        """Well-formed og:image URL is returned without gallery fallback."""
+        img_url = 'https://cdn.example.com/product.jpg'
+        result = adapter.get_image_url(_html_og(img_url), URL)
+        assert result == img_url
+
+    def test_malformed_og_image_falls_back_to_pdp_gallery(self):
+        """Concatenated og:image (Demandware bug) → gallery pdp img returned."""
+        bad = '/on/demandware.static/-/Sites/en_NZ/https://cdn.example.com/product.jpg'
+        good = 'https://cdn.example.com/product.jpg'
+        result = adapter.get_image_url(_html_og_and_pdp(bad, good), URL)
+        assert result == good
+
+    def test_no_og_image_falls_back_to_pdp_gallery(self):
+        """No og:image tag → gallery pdp img returned."""
+        src = 'https://cdn.example.com/product.jpg'
+        result = adapter.get_image_url(_html_pdp(src), URL)
+        assert result == src
+
+    def test_no_og_image_no_pdp_returns_none(self):
+        """No og:image and no pdp img → None."""
+        result = adapter.get_image_url('<html><body><p>No images.</p></body></html>', URL)
+        assert result is None
+
+    def test_protocol_relative_og_image_normalised(self):
+        """Protocol-relative og:image is prefixed with https:."""
+        result = adapter.get_image_url(_html_og('//cdn.example.com/product.jpg'), URL)
+        assert result == 'https://cdn.example.com/product.jpg'

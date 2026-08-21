@@ -30,7 +30,7 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
-from .base import BaseAdapter, DimensionResult, fetch_url, extract_and_prepare_image
+from .base import BaseAdapter, DimensionResult, fetch_url, ImageResult, prepare_image
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -469,7 +469,8 @@ class LGAdapter(BaseAdapter):
                 )
             soup = BeautifulSoup(html, 'lxml')
             result = self._find_dimensions(soup, product_url)
-            img = extract_and_prepare_image(html, product_url)
+            img_url = self.get_image_url(html, product_url)
+            img = prepare_image(img_url) if img_url else ImageResult(status='Not Found')
             result.image_bytes  = img.image_bytes
             result.image_status = img.status
             return result

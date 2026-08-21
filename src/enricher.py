@@ -2,7 +2,7 @@
 
 Public API:
   get_blank_rows(wb)       → list[RowSpec]
-  enrich_rows_iter(rows, force_retry)  → generator of (RowSpec, DimensionResult, bool)
+  enrich_rows_iter(rows, force_retry)  → generator of (RowSpec, DimensionResult, bool, bool)
   apply_results(wb, rows, results)     → modified Workbook
 """
 
@@ -23,7 +23,7 @@ from openpyxl.styles import PatternFill
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent / 'adapters'))
 
-from adapters.base import DimensionResult
+from adapters.base import DimensionResult, fetch_url, extract_and_prepare_image
 from adapters.registry import fetch_for_brand
 import cache as dim_cache
 
@@ -143,28 +143,53 @@ def summarise_blank_rows(rows: list[RowSpec]) -> dict:
 def enrich_rows_iter(
     rows: list[RowSpec],
     force_retry: bool = False,
-) -> Generator[tuple[RowSpec, DimensionResult, bool], None, None]:
+) -> Generator[tuple[RowSpec, DimensionResult, bool, bool], None, None]:
     """
-    Yield (RowSpec, DimensionResult, fetched) for each row.
+    Yield (RowSpec, DimensionResult, dim_fetched, img_fetched) for each row.
 
-    fetched=True  → network was used (fresh fetch or first time)
-    fetched=False → result served from cache
+    dim_fetched — True when a full adapter call was made (dimensions re-fetched from network)
+    img_fetched — True when an image was fetched (via full adapter call or image-only path)
+
+    The two concerns are tracked independently:
+      • dim_fetched=False, img_fetched=True  → dimensions were already Resolved; only
+        the page was re-fetched to extract the og:image (no dimension re-parsing).
+      • dim_fetched=False, img_fetched=False → both are already complete; result served
+        entirely from cache with no network activity.
     """
     for row in rows:
         if not row.link:
             yield row, DimensionResult(
                 confidence='Not Found',
                 reason='No product URL available',
-            ), False
-        elif not dim_cache.should_fetch(row.link, force_retry):
-            yield row, dim_cache.get_cached(row.link) or DimensionResult(
-                confidence='Not Found',
-                reason='Cache miss (unexpected)',
-            ), False
-        else:
+            ), False, False
+            continue
+
+        need_dims = dim_cache.should_fetch_dims(row.link, force_retry)
+        need_img  = dim_cache.should_fetch_image(row.link)
+
+        if need_dims:
+            # Full adapter call: fetches HTML, extracts dimensions + image together
             result = fetch_for_brand(row.brand, row.link)
             dim_cache.store_result(row.link, result)
-            yield row, result, True
+            yield row, result, True, True
+
+        elif need_img:
+            # Dimensions already Resolved — fetch page once more for image only;
+            # dimension fields in the cached result are preserved unchanged.
+            cached = dim_cache.get_cached(row.link) or DimensionResult(
+                confidence='Not Found', reason='Cache miss (unexpected)')
+            html, _err = fetch_url(row.link)
+            if html:
+                img = extract_and_prepare_image(html, row.link)
+                cached.image_bytes  = img.image_bytes
+                cached.image_status = img.status
+            dim_cache.store_result(row.link, cached)
+            yield row, cached, False, True
+
+        else:
+            # Both dimensions and image already complete — pure cache hit
+            yield row, dim_cache.get_cached(row.link) or DimensionResult(
+                confidence='Not Found', reason='Cache miss (unexpected)'), False, False
 
 
 # ---------------------------------------------------------------------------
@@ -261,14 +286,15 @@ def _write_run_info_sheet(wb: Workbook, meta: dict) -> None:
 
     counts = meta.get('confidence_counts', {})
     rows = [
-        ('Run Timestamp',  datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')),
-        ('Force Retry',    str(meta.get('force_retry', False))),
-        ('Total Rows',     meta.get('total_rows', 0)),
-        ('Fresh Fetches',  meta.get('fetched_count', 0)),
-        ('Cache Hits',     meta.get('cache_hit_count', 0)),
-        ('Resolved',       counts.get('Resolved', 0)),
-        ('Needs Review',   counts.get('Needs Review', 0)),
-        ('Not Found',      counts.get('Not Found', 0)),
+        ('Run Timestamp',           datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')),
+        ('Force Retry',             str(meta.get('force_retry', False))),
+        ('Total Rows',              meta.get('total_rows', 0)),
+        ('Dimension Fresh Fetches', meta.get('dim_fetched_count', 0)),
+        ('Image Fresh Fetches',     meta.get('img_fetched_count', 0)),
+        ('Cache Hits',              meta.get('cache_hit_count', 0)),
+        ('Resolved',                counts.get('Resolved', 0)),
+        ('Needs Review',            counts.get('Needs Review', 0)),
+        ('Not Found',               counts.get('Not Found', 0)),
     ]
     for i, (key, val) in enumerate(rows, start=2):
         ws.cell(i, 1, key)
@@ -300,15 +326,18 @@ def enrich_workbook(
     rows   = get_blank_rows(wb)
     total  = len(rows)
     results: dict[tuple[str, int], DimensionResult] = {}
-    fetched_count = 0
-    cache_hit_count = 0
+    dim_fetched_count = 0
+    img_fetched_count = 0
+    cache_hit_count   = 0
     confidence_counts: dict[str, int] = {'Resolved': 0, 'Needs Review': 0, 'Not Found': 0}
 
-    for i, (row, result, fetched) in enumerate(enrich_rows_iter(rows, force_retry)):
+    for i, (row, result, dim_fetched, img_fetched) in enumerate(enrich_rows_iter(rows, force_retry)):
         results[(row.sheet, row.row_idx)] = result
-        if fetched:
-            fetched_count += 1
-        else:
+        if dim_fetched:
+            dim_fetched_count += 1
+        if img_fetched:
+            img_fetched_count += 1
+        if not dim_fetched and not img_fetched:
             cache_hit_count += 1
         confidence_counts[result.confidence] = confidence_counts.get(result.confidence, 0) + 1
         if progress_cb:
@@ -316,11 +345,12 @@ def enrich_workbook(
 
     apply_results(wb, rows, results)
     _write_run_info_sheet(wb, {
-        'force_retry':       force_retry,
-        'total_rows':        total,
-        'fetched_count':     fetched_count,
-        'cache_hit_count':   cache_hit_count,
-        'confidence_counts': confidence_counts,
+        'force_retry':        force_retry,
+        'total_rows':         total,
+        'dim_fetched_count':  dim_fetched_count,
+        'img_fetched_count':  img_fetched_count,
+        'cache_hit_count':    cache_hit_count,
+        'confidence_counts':  confidence_counts,
     })
     wb.save(output_path)
 

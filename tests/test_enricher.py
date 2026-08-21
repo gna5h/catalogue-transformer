@@ -209,7 +209,8 @@ class TestRunInfoSheet:
         out = tmp_path / 'out.xlsx'
 
         with patch('enricher.fetch_for_brand', return_value=resolved), \
-             patch('enricher.dim_cache.should_fetch', return_value=True), \
+             patch('enricher.dim_cache.should_fetch_dims', return_value=True), \
+             patch('enricher.dim_cache.should_fetch_image', return_value=False), \
              patch('enricher.dim_cache.store_result'):
             enrich_workbook(_wb_bytes([{'product': 'SKU1', 'link': 'http://example.com/sku1'}]),
                             out, force_retry=True)
@@ -220,28 +221,30 @@ class TestRunInfoSheet:
 
         ws = wb_out['Run Info']
         keys = [ws.cell(r, 1).value for r in range(2, ws.max_row + 1)]
-        assert 'Run Timestamp' in keys
-        assert 'Fresh Fetches' in keys
-        assert 'Cache Hits'    in keys
-        assert 'Resolved'      in keys
+        assert 'Run Timestamp'           in keys
+        assert 'Dimension Fresh Fetches' in keys
+        assert 'Image Fresh Fetches'     in keys
+        assert 'Cache Hits'              in keys
+        assert 'Resolved'                in keys
 
     def test_fetch_and_cache_counts_are_correct(self, tmp_path):
-        """Fresh Fetches and Cache Hits must reflect actual fetch vs cache decisions."""
+        """Dimension/Image Fresh Fetches and Cache Hits must reflect actual fetch decisions."""
         resolved  = DimensionResult(height='454', width='261', depth='328', confidence='Resolved')
-        not_found = DimensionResult(confidence='Not Found', reason='No data')
+        not_found = DimensionResult(confidence='Not Found', reason='No data', image_status='Embedded')
         out = tmp_path / 'out.xlsx'
 
-        # Row 1: fetched (should_fetch=True for its URL)
-        # Row 2: cache hit (should_fetch=False for its URL, get_cached returns not_found)
-        def _should_fetch(url, force_retry):
-            return 'sku1' in url  # only sku1 triggers a network call
+        # Row 1 (sku1): needs dim fetch  → adapter called → dim_fetched=True, img_fetched=True
+        # Row 2 (sku2): dims + image done → pure cache hit → dim_fetched=False, img_fetched=False
+        def _should_fetch_dims(url, force_retry):
+            return 'sku1' in url
 
         def _get_cached(url):
-            return not_found
+            return not_found   # image_status='Embedded' so should_fetch_image returns False
 
         with patch('enricher.fetch_for_brand', return_value=resolved), \
-             patch('enricher.dim_cache.should_fetch', side_effect=_should_fetch), \
-             patch('enricher.dim_cache.get_cached',  side_effect=_get_cached), \
+             patch('enricher.dim_cache.should_fetch_dims',  side_effect=_should_fetch_dims), \
+             patch('enricher.dim_cache.should_fetch_image', return_value=False), \
+             patch('enricher.dim_cache.get_cached',         side_effect=_get_cached), \
              patch('enricher.dim_cache.store_result'):
             enrich_workbook(
                 _wb_bytes([
@@ -256,5 +259,6 @@ class TestRunInfoSheet:
         info = {ws.cell(r, 1).value: ws.cell(r, 2).value
                 for r in range(2, ws.max_row + 1)}
 
-        assert info['Fresh Fetches'] == 1
-        assert info['Cache Hits']    == 1
+        assert info['Dimension Fresh Fetches'] == 1   # sku1 adapter call
+        assert info['Image Fresh Fetches']     == 1   # sku1 image attempted via adapter
+        assert info['Cache Hits']              == 1   # sku2 served entirely from cache

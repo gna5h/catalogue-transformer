@@ -105,15 +105,15 @@ def store_result(url: str, result: DimensionResult) -> None:
         conn.close()
 
 
-def should_fetch(url: str, force_retry: bool) -> bool:
+def should_fetch_dims(url: str, force_retry: bool) -> bool:
     """
-    Return True if the URL needs a fresh fetch.
+    Return True if the URL needs a fresh dimension fetch.
 
     Rules:
-      - Not in cache                         → always fetch
-      - Cached as 'Resolved'                 → never re-fetch
-      - Cached as anything else + force_retry → re-fetch
-      - Cached as anything else + no retry   → use cached result
+      - Not in cache                              → always fetch
+      - Cached as 'Resolved'                      → never re-fetch dimensions
+      - Cached as anything else + force_retry     → re-fetch
+      - Cached as anything else + no retry        → use cached result
     """
     cached = get_cached(url)
     if cached is None:
@@ -121,3 +121,23 @@ def should_fetch(url: str, force_retry: bool) -> bool:
     if cached.confidence == 'Resolved':
         return False
     return force_retry
+
+
+def should_fetch_image(url: str) -> bool:
+    """
+    Return True if the URL needs a fresh image fetch.
+
+    Only skips when the image has already been successfully embedded ('Embedded').
+    Not Found / Download Failed are always retried so transient failures are healed
+    on the next run without needing a manual force_retry.
+    """
+    cached = get_cached(url)
+    if cached is None:
+        return True
+    return cached.image_status != 'Embedded'
+
+
+# Backward-compatible alias used by external scripts
+def should_fetch(url: str, force_retry: bool) -> bool:
+    """Alias for should_fetch_dims — kept for backward compatibility."""
+    return should_fetch_dims(url, force_retry)

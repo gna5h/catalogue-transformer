@@ -14,6 +14,7 @@ from .haier import HaierAdapter
 from .westinghouse import WestinghouseAdapter
 from .electrolux import ElectroluxAdapter
 from .miele import MieleAdapter
+from .smeg import SmegAdapter
 
 ADAPTERS: dict[str, BaseAdapter] = {
     'lg':               LGAdapter(),
@@ -24,6 +25,7 @@ ADAPTERS: dict[str, BaseAdapter] = {
     'westinghouse':     WestinghouseAdapter(),
     'electrolux':       ElectroluxAdapter(),
     'miele':            MieleAdapter(),
+    'smeg':             SmegAdapter(),
 }
 
 

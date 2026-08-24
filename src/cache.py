@@ -43,6 +43,7 @@ ADAPTER_VERSIONS: dict[str, dict[str, int]] = {
     'Westinghouse':    {'dim': 1, 'img': 1},
     'Electrolux':      {'dim': 1, 'img': 1},
     'Miele':           {'dim': 1, 'img': 1},
+    'Smeg':            {'dim': 1, 'img': 1},
 }
 
 

@@ -13,6 +13,7 @@ from .fp import FPAdapter
 from .haier import HaierAdapter
 from .westinghouse import WestinghouseAdapter
 from .electrolux import ElectroluxAdapter
+from .miele import MieleAdapter
 
 ADAPTERS: dict[str, BaseAdapter] = {
     'lg':               LGAdapter(),
@@ -22,6 +23,7 @@ ADAPTERS: dict[str, BaseAdapter] = {
     'haier':            HaierAdapter(),
     'westinghouse':     WestinghouseAdapter(),
     'electrolux':       ElectroluxAdapter(),
+    'miele':            MieleAdapter(),
 }
 
 

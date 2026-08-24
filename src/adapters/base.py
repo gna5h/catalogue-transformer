@@ -9,7 +9,12 @@ from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import urlparse, urljoin
 
-import requests
+try:
+    from curl_cffi import requests          # TLS/HTTP2 fingerprint impersonation (bypasses Akamai/Cloudflare WAF)
+    _CFFI_IMPERSONATE = 'chrome124'
+except ImportError:
+    import requests                         # type: ignore[no-redef]
+    _CFFI_IMPERSONATE = None
 
 # ---------------------------------------------------------------------------
 # Data types
@@ -79,12 +84,14 @@ def fetch_url(url: str, *, binary: bool = False) -> tuple[Optional[bytes | str],
     _LAST_REQ[domain] = time.monotonic()
 
     try:
-        resp = requests.get(
-            url,
+        get_kwargs: dict = dict(
             headers=_HEADERS,
             timeout=_REQUEST_TIMEOUT_S,
             allow_redirects=True,
         )
+        if _CFFI_IMPERSONATE:
+            get_kwargs['impersonate'] = _CFFI_IMPERSONATE
+        resp = requests.get(url, **get_kwargs)
     except requests.Timeout:
         return None, 'timeout'
     except requests.RequestException as exc:

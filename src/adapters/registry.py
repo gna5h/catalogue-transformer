@@ -11,6 +11,7 @@ from .bosch import BoschAdapter
 from .samsung import SamsungAdapter
 from .fp import FPAdapter
 from .haier import HaierAdapter
+from .westinghouse import WestinghouseAdapter
 
 ADAPTERS: dict[str, BaseAdapter] = {
     'lg':               LGAdapter(),
@@ -18,6 +19,7 @@ ADAPTERS: dict[str, BaseAdapter] = {
     'samsung':          SamsungAdapter(),
     'fisher & paykel':  FPAdapter(),
     'haier':            HaierAdapter(),
+    'westinghouse':     WestinghouseAdapter(),
 }
 
 

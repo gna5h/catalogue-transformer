@@ -40,6 +40,7 @@ ADAPTER_VERSIONS: dict[str, dict[str, int]] = {
     'Haier':           {'dim': 1, 'img': 1},
     'Bosch':           {'dim': 1, 'img': 2},  # img bumped: JSON-LD primary shot (was og:image)
     'LG':              {'dim': 1, 'img': 1},
+    'Westinghouse':    {'dim': 1, 'img': 1},
 }
 
 

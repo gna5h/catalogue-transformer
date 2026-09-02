@@ -11,6 +11,11 @@ from .bosch import BoschAdapter
 from .samsung import SamsungAdapter
 from .fp import FPAdapter
 from .haier import HaierAdapter
+from .westinghouse import WestinghouseAdapter
+from .electrolux import ElectroluxAdapter
+from .miele import MieleAdapter
+from .smeg import SmegAdapter
+from .beko import BekoAdapter
 
 ADAPTERS: dict[str, BaseAdapter] = {
     'lg':               LGAdapter(),
@@ -18,6 +23,11 @@ ADAPTERS: dict[str, BaseAdapter] = {
     'samsung':          SamsungAdapter(),
     'fisher & paykel':  FPAdapter(),
     'haier':            HaierAdapter(),
+    'westinghouse':     WestinghouseAdapter(),
+    'electrolux':       ElectroluxAdapter(),
+    'miele':            MieleAdapter(),
+    'smeg':             SmegAdapter(),
+    'beko':             BekoAdapter(),
 }
 
 

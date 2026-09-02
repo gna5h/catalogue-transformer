@@ -41,6 +41,11 @@ ADAPTER_VERSIONS: dict[str, dict[str, int]] = {
     'Bosch':           {'dim': 1, 'img': 2},  # img bumped: JSON-LD primary shot (was og:image)
     'LG':              {'dim': 1, 'img': 1},
     'Samsung':         {'dim': 1, 'img': 2},  # img bumped: /business/ URL fallback to consumer og:image
+    'Westinghouse':    {'dim': 1, 'img': 1},
+    'Electrolux':      {'dim': 1, 'img': 1},
+    'Miele':           {'dim': 1, 'img': 1},
+    'Smeg':            {'dim': 1, 'img': 1},
+    'Beko':            {'dim': 1, 'img': 1},
 }
 
 

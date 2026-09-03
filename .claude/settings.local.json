@@ -1,0 +1,11 @@
+{
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "claude-flow"
+  ],
+  "permissions": {
+    "allow": [
+      "Bash(cd /c/Users/Gnash/Development/Amorini/catalogue-transformer && python -m pytest tests/test_samsung_adapter.py -v 2>&1)"
+    ]
+  }
+}

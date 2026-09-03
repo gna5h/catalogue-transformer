@@ -40,7 +40,7 @@ ADAPTER_VERSIONS: dict[str, dict[str, int]] = {
     'Haier':           {'dim': 1, 'img': 1},
     'Bosch':           {'dim': 1, 'img': 2},  # img bumped: JSON-LD primary shot (was og:image)
     'LG':              {'dim': 1, 'img': 1},
-    'Samsung':         {'dim': 1, 'img': 2},  # img bumped: /business/ URL fallback to consumer og:image
+    'Samsung':         {'dim': 3, 'img': 2},  # dim bumped: force re-verify; fix non-Resolved always-stale logic
     'Westinghouse':    {'dim': 1, 'img': 1},
     'Electrolux':      {'dim': 1, 'img': 1},
     'Miele':           {'dim': 1, 'img': 1},
@@ -183,8 +183,8 @@ def should_fetch_dims(url: str, force_retry: bool, brand: str = '') -> bool:
       - Not in cache                                         → always fetch
       - In cache, brand known, dim_version differs           → stale; fetch
       - In cache, confidence == 'Resolved', version current → never re-fetch
-      - In cache, non-Resolved + force_retry                → re-fetch
-      - In cache, non-Resolved + no retry                   → use cached result
+      - In cache, non-Resolved                              → always fetch
+                                                              (re-fetched each run until Resolved)
 
     NULL stored versions are treated as version 1 (pre-versioning legacy rows).
     """
@@ -199,7 +199,7 @@ def should_fetch_dims(url: str, force_retry: bool, brand: str = '') -> bool:
             return True  # adapter dimension logic changed — treat as stale
     if confidence == 'Resolved':
         return False
-    return force_retry
+    return True  # non-Resolved → always stale; retry every run
 
 
 def should_fetch_image(url: str, brand: str = '') -> bool:

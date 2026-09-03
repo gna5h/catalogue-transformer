@@ -181,10 +181,13 @@ def enrich_rows_iter(
             html, _err = fetch_url(row.link)
             if html:
                 adapter = get_adapter(row.brand)
-                img_url = adapter.get_image_url(html, row.link) if adapter else None
-                if img_url:
-                    img = prepare_image(img_url)
-                else:
+                try:
+                    img_url = adapter.get_image_url(html, row.link) if adapter else None
+                    if img_url:
+                        img = prepare_image(img_url)
+                    else:
+                        img = ImageResult(status='Not Found')
+                except Exception:
                     img = ImageResult(status='Not Found')
                 cached.image_bytes  = img.image_bytes
                 cached.image_status = img.status

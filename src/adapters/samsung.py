@@ -84,9 +84,12 @@ def _parse_wxhxd(value: str) -> Optional[tuple[str, str, str]]:
 def _spec_pairs(soup: BeautifulSoup) -> list[tuple[str, str]]:
     """Extract (label, value) pairs from all known Samsung spec HTML structures.
 
-    Structure 1 (current): <p class="pdd32-product-spec__content-item-title"> /
-                            <p class="pdd32-product-spec__content-item-desc">
-    Structure 2 (legacy):  <dt> / <dd>
+    Structure 1 (current):  <p class="pdd32-product-spec__content-item-title"> /
+                             <p class="pdd32-product-spec__content-item-desc">
+    Structure 2 (legacy):   <dt> / <dd>
+    Structure 3 (business): <li class="spec-highlight__item"> containing
+                             <strong class="spec-highlight__title"> /
+                             <span class="spec-highlight__value">
     """
     pairs: list[tuple[str, str]] = []
 
@@ -104,6 +107,15 @@ def _spec_pairs(soup: BeautifulSoup) -> list[tuple[str, str]]:
         if label and dd_tag:
             value = dd_tag.get_text(strip=True)
             if value:
+                pairs.append((label, value))
+
+    for item in soup.find_all('li', class_='spec-highlight__item'):
+        title_tag = item.find('strong', class_='spec-highlight__title')
+        value_tag = item.find('span', class_='spec-highlight__value')
+        if title_tag and value_tag:
+            label = title_tag.get_text(strip=True)
+            value = value_tag.get_text(strip=True)
+            if label and value:
                 pairs.append((label, value))
 
     return pairs
@@ -217,6 +229,8 @@ class SamsungAdapter(BaseAdapter):
         return normalise_image_url(raw, page_url)
 
     def fetch_dimensions(self, product_url: str) -> DimensionResult:
+        # Concern 1: fetch HTML and extract dimensions.
+        # Any exception here returns Not Found (correct existing behaviour).
         try:
             html, err = fetch_url(product_url)
             if html is None:
@@ -229,12 +243,18 @@ class SamsungAdapter(BaseAdapter):
             else:
                 result = DimensionResult(confidence='Not Found', source_url=product_url,
                                          reason='No dimension data found on page')
-            img_url = self.get_image_url(html, product_url)
-            img = prepare_image(img_url) if img_url else ImageResult(status='Not Found')
-            result.image_bytes  = img.image_bytes
-            result.image_status = img.status
-            return result
         except Exception as exc:
             return DimensionResult(confidence='Not Found', source_url=product_url,
                                    reason=f'Unexpected error: {type(exc).__name__}',
                                    raw_text=str(exc))
+
+        # Concern 2: image extraction — failure here must never override dimension result.
+        try:
+            img_url = self.get_image_url(html, product_url)
+            img = prepare_image(img_url) if img_url else ImageResult(status='Not Found')
+        except Exception:
+            img = ImageResult(status='Not Found')
+
+        result.image_bytes  = img.image_bytes
+        result.image_status = img.status
+        return result

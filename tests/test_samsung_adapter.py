@@ -41,6 +41,22 @@ def _html_dl(*pairs: tuple[str, str]) -> str:
     return f'<html><body><dl>{items}</dl></body></html>'
 
 
+def _html_business(*pairs: tuple[str, str]) -> str:
+    """Build a minimal page using the Samsung /business/ storefront spec structure."""
+    items = ''.join(
+        f'<li class="spec-highlight__item" role="listitem">'
+        f'<strong class="spec-highlight__title">{label}</strong>'
+        f'<span class="spec-highlight__value">{value}</span>'
+        f'</li>'
+        for label, value in pairs
+    )
+    return (
+        '<html><body>'
+        f'<ul class="spec-highlight__list" role="list">{items}</ul>'
+        '</body></html>'
+    )
+
+
 def _fetch(html: str) -> tuple[str, str]:
     return (html, '')
 
@@ -186,6 +202,20 @@ class TestSamsungAdapterParsing:
         assert result.height == '845'
         assert result.depth  == '600'
 
+    def test_business_storefront_individual_net_labels_resolved(self):
+        """Business-storefront markup with Net Width/Height/Depth parses to Resolved."""
+        html = _html_business(
+            ('Net Width', '598'),
+            ('Net Height', '845'),
+            ('Net Depth', '600'),
+        )
+        with patch('adapters.samsung.fetch_url', return_value=_fetch(html)):
+            result = adapter.fetch_dimensions(URL)
+        assert result.confidence == 'Resolved'
+        assert result.width  == '598'
+        assert result.height == '845'
+        assert result.depth  == '600'
+
     def test_fetch_timeout_returns_not_found(self):
         """fetch_url timeout → Not Found with reason preserved."""
         with patch('adapters.samsung.fetch_url', return_value=_fetch_none('timeout')):
@@ -220,6 +250,33 @@ _BUSINESS_URL = 'https://www.samsung.com/nz/business/dishwashers/dw60bg8070sr/'
 
 def _html_og(content: str) -> str:
     return f'<html><head><meta property="og:image" content="{content}" /></head><body></body></html>'
+
+
+class TestBusinessUrlDimensionSurvival:
+
+    def test_business_url_dims_resolved_even_when_consumer_fetch_fails(self):
+        """/business/ URL with valid dimension data: dimensions Resolved even if consumer URL fetch fails.
+
+        This guards the fix for the overly-broad try/except that previously discarded
+        resolved dimensions whenever get_image_url() (including the business→consumer
+        fallback) raised or the consumer fetch failed in a way that propagated.
+        """
+        business_url = 'https://www.samsung.com/nz/business/dishwashers/freestanding/dw60m6055fg-sa/'
+        html = _html_pdd32(
+            ('Net Width',  '598 mm'),
+            ('Net Height', '845 mm'),
+            ('Net Depth',  '600 mm'),
+        )
+        # First fetch_url call returns the business page HTML (dimensions present).
+        # Second fetch_url call (inside get_image_url → consumer fallback) fails → None.
+        fetch_results = iter([(html, ''), (None, 'HTTP 404')])
+        with patch('adapters.samsung.fetch_url', side_effect=lambda *a, **kw: next(fetch_results)):
+            result = adapter.fetch_dimensions(business_url)
+        assert result.confidence == 'Resolved'
+        assert result.width  == '598'
+        assert result.height == '845'
+        assert result.depth  == '600'
+        assert result.image_status == 'Not Found'  # image correctly absent, not a crash
 
 
 class TestSamsungAdapterGetImageUrl:

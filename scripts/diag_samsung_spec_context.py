@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 from adapters.base import fetch_url
 
-URL = 'https://www.samsung.com/nz/dishwashers/freestanding/13-place-settings-white-dw60m6045fw-sa/'
+URL = 'https://www.samsung.com/nz/business/dishwashers/freestanding/60cm-freestanding-dishwasher-14-place-settings-black-dw60m6055fg-sa/'
 print(f'Fetching {URL}')
 html, err = fetch_url(URL)
 if html is None:

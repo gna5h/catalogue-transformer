@@ -43,6 +43,8 @@ _WXHXD_LABEL_RE = re.compile(r'wxhxd', re.IGNORECASE)
 
 _GENERIC_LOGO_RE = re.compile(r'logo-square-letter', re.IGNORECASE)
 
+_GALLERY_CDN_RE = re.compile(r'images\.samsung\.com/is/image/samsung/p6pim/', re.IGNORECASE)
+
 # Parses "N x N x N mm" or "N X N X N" combined value in W x H x D order
 _WXHXD_VALUE_RE = re.compile(
     r'^(\d+)\s*[xX]\s*(\d+)\s*[xX]\s*(\d+)\s*(mm|cm)?\s*$',
@@ -52,6 +54,24 @@ _WXHXD_VALUE_RE = re.compile(
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
+
+
+def _get_gallery_image_url(html: str) -> Optional[str]:
+    """Return the first Samsung gallery CDN image URL from HTML, excluding thumbnails.
+
+    Matches server-rendered <img src="https://images.samsung.com/is/image/samsung/p6pim/...">
+    tags. Thumbnail slugs contain '-thumb-' and are skipped; placeholder <img> tags
+    have empty src and are skipped by the CDN domain check.
+    """
+    soup = BeautifulSoup(html, 'lxml')
+    for img in soup.find_all('img'):
+        src = (img.get('src') or '').strip()
+        if not _GALLERY_CDN_RE.search(src):
+            continue
+        if '-thumb-' in src.lower():
+            continue
+        return src
+    return None
 
 
 def _is_excluded(label: str) -> bool:
@@ -215,18 +235,37 @@ class SamsungAdapter(BaseAdapter):
     brand_name = 'Samsung'
 
     def get_image_url(self, html: str, page_url: str) -> Optional[str]:
-        """/business/ URLs serve a generic logo as og:image; fall back to consumer URL."""
+        """Samsung image extraction: gallery CDN image first, validated og:image fallback.
+
+        Priority order:
+          1. First Samsung gallery CDN <img> in already-fetched HTML (excludes thumbnails).
+          2. og:image from already-fetched HTML, if it is not the generic logo.
+          3. For /business/ URLs only: fetch consumer URL equivalent and repeat steps 1–2.
+        """
+        # Step 1: gallery extraction on current page
+        url = _get_gallery_image_url(html)
+        if url:
+            return url
+
+        # Step 2: og:image on current page (validated — rejects generic logo)
+        raw = get_og_image_url(html)
+        if raw and not _GENERIC_LOGO_RE.search(raw):
+            return normalise_image_url(raw, page_url)
+
+        # Step 3: /business/ pages — try consumer URL equivalent
         if '/business/' in page_url:
             consumer_url = page_url.replace('/business/', '/', 1)
             consumer_html, _err = fetch_url(consumer_url)
             if consumer_html is None:
                 return None
+            url = _get_gallery_image_url(consumer_html)
+            if url:
+                return url
             raw = get_og_image_url(consumer_html)
-        else:
-            raw = get_og_image_url(html)
-        if not raw or _GENERIC_LOGO_RE.search(raw):
-            return None
-        return normalise_image_url(raw, page_url)
+            if raw and not _GENERIC_LOGO_RE.search(raw):
+                return normalise_image_url(raw, page_url)
+
+        return None
 
     def fetch_dimensions(self, product_url: str) -> DimensionResult:
         # Concern 1: fetch HTML and extract dimensions.

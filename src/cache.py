@@ -40,7 +40,7 @@ ADAPTER_VERSIONS: dict[str, dict[str, int]] = {
     'Haier':           {'dim': 1, 'img': 1},
     'Bosch':           {'dim': 1, 'img': 2},  # img bumped: JSON-LD primary shot (was og:image)
     'LG':              {'dim': 1, 'img': 1},
-    'Samsung':         {'dim': 3, 'img': 2},  # dim bumped: force re-verify; fix non-Resolved always-stale logic
+    'Samsung':         {'dim': 3, 'img': 3},  # img bumped: gallery CDN extraction is now primary strategy
     'Westinghouse':    {'dim': 1, 'img': 1},
     'Electrolux':      {'dim': 1, 'img': 1},
     'Miele':           {'dim': 1, 'img': 1},
@@ -180,11 +180,14 @@ def should_fetch_dims(url: str, force_retry: bool, brand: str = '') -> bool:
     Return True if the URL needs a fresh dimension fetch.
 
     Rules (evaluated in order):
-      - Not in cache                                         → always fetch
-      - In cache, brand known, dim_version differs           → stale; fetch
-      - In cache, confidence == 'Resolved', version current → never re-fetch
-      - In cache, non-Resolved                              → always fetch
-                                                              (re-fetched each run until Resolved)
+      - Not in cache                                                   → always fetch
+      - In cache, brand known, dim_version differs                     → stale; fetch
+      - In cache, confidence == 'Resolved', version current,
+        force_retry=True                                               → forced re-fetch
+      - In cache, confidence == 'Resolved', version current,
+        force_retry=False                                              → use cache
+      - In cache, non-Resolved                                         → always fetch
+                                                                         (re-fetched each run until Resolved)
 
     NULL stored versions are treated as version 1 (pre-versioning legacy rows).
     """
@@ -198,7 +201,7 @@ def should_fetch_dims(url: str, force_retry: bool, brand: str = '') -> bool:
         if stored_dim_v != current_dim_v:
             return True  # adapter dimension logic changed — treat as stale
     if confidence == 'Resolved':
-        return False
+        return force_retry  # honour caller; False=use cache, True=force re-fetch
     return True  # non-Resolved → always stale; retry every run
 
 

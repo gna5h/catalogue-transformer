@@ -230,6 +230,21 @@ class TestSamsungAdapterParsing:
         assert result.confidence == 'Not Found'
         assert 'access refused' in result.reason
 
+    def test_fetch_404_returns_not_found(self):
+        """fetch_url HTTP 404 → Not Found with 'HTTP 404' in reason."""
+        with patch('adapters.samsung.fetch_url', return_value=_fetch_none('HTTP 404')):
+            result = adapter.fetch_dimensions(URL)
+        assert result.confidence == 'Not Found'
+        assert result.reason == 'HTTP 404'
+
+    def test_fetch_redirect_returns_not_found(self):
+        """fetch_url redirect detection → Not Found with 'redirected to' in reason."""
+        reason = 'redirected to: https://www.samsung.com/nz/'
+        with patch('adapters.samsung.fetch_url', return_value=_fetch_none(reason)):
+            result = adapter.fetch_dimensions(URL)
+        assert result.confidence == 'Not Found'
+        assert 'redirected to' in result.reason
+
     def test_unexpected_exception_caught(self):
         """BeautifulSoup raises RuntimeError → Not Found with 'RuntimeError' in reason."""
         with patch('adapters.samsung.fetch_url', return_value=_fetch('<html></html>')):
@@ -246,10 +261,24 @@ class TestSamsungAdapterParsing:
 _PRODUCT_IMG = 'https://images.samsung.com/is/image/samsung/nz-dw60bg8070sr-1.jpg'
 _LOGO_IMG    = 'https://images.samsung.com/etc/designs/smg/global/imgs/logo-square-letter.png'
 _BUSINESS_URL = 'https://www.samsung.com/nz/business/dishwashers/dw60bg8070sr/'
+_GALLERY_IMG = (
+    'https://images.samsung.com/is/image/samsung/p6pim/nz/rf71db9956qdsa/'
+    'gallery/nz-t-style-french-door-32inch-family-hub-rf71db9956qdsa-550097446'
+    '?$1164_776_PNG$'
+)
+_GALLERY_THUMB = (
+    'https://images.samsung.com/is/image/samsung/p6pim/nz/rf71db9956qdsa/'
+    'gallery/nz-t-style-french-door-32inch-family-hub-rf71db9956qdsa-thumb-550097447'
+)
 
 
 def _html_og(content: str) -> str:
     return f'<html><head><meta property="og:image" content="{content}" /></head><body></body></html>'
+
+
+def _html_gallery_img(src: str, og: str = '') -> str:
+    og_tag = f'<meta property="og:image" content="{og}" />' if og else ''
+    return f'<html><head>{og_tag}</head><body><img src="{src}" alt="Product"/></body></html>'
 
 
 class TestBusinessUrlDimensionSurvival:
@@ -282,7 +311,7 @@ class TestBusinessUrlDimensionSurvival:
 class TestSamsungAdapterGetImageUrl:
 
     def test_business_url_fetches_consumer_og_image(self):
-        """/business/ URL → consumer URL fetched → valid og:image returned."""
+        """/business/ URL, no gallery on either page → step 3 consumer og:image returned as last resort."""
         consumer_html = _html_og(_PRODUCT_IMG)
         with patch('adapters.samsung.fetch_url', return_value=(consumer_html, '')):
             result = adapter.get_image_url('<html></html>', _BUSINESS_URL)
@@ -302,7 +331,7 @@ class TestSamsungAdapterGetImageUrl:
         assert result is None
 
     def test_consumer_url_valid_og_image_returned(self):
-        """Normal (non-/business/) URL → valid og:image extracted directly."""
+        """Normal URL → gallery extraction finds nothing (_PRODUCT_IMG lacks p6pim path) → og:image fallback triggers."""
         html = _html_og(_PRODUCT_IMG)
         result = adapter.get_image_url(html, URL)
         assert result == _PRODUCT_IMG
@@ -312,3 +341,55 @@ class TestSamsungAdapterGetImageUrl:
         html = _html_og(_LOGO_IMG)
         result = adapter.get_image_url(html, URL)
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# TestSamsungGalleryExtraction
+# ---------------------------------------------------------------------------
+
+
+class TestSamsungGalleryExtraction:
+
+    def test_consumer_url_gallery_image_returned(self):
+        """Gallery CDN img present in HTML → returned directly (no og:image consulted)."""
+        html = _html_gallery_img(_GALLERY_IMG)
+        result = adapter.get_image_url(html, URL)
+        assert result == _GALLERY_IMG
+
+    def test_consumer_url_gallery_thumbnail_skipped_og_image_fallback(self):
+        """Only a thumbnail gallery img in page → skipped; og:image fallback used."""
+        html = _html_gallery_img(_GALLERY_THUMB, og=_PRODUCT_IMG)
+        result = adapter.get_image_url(html, URL)
+        assert result == _PRODUCT_IMG
+
+    def test_consumer_url_gallery_wins_over_og_image(self):
+        """Both gallery img and valid og:image present → gallery img wins."""
+        html = _html_gallery_img(_GALLERY_IMG, og=_PRODUCT_IMG)
+        result = adapter.get_image_url(html, URL)
+        assert result == _GALLERY_IMG
+
+    def test_consumer_url_no_gallery_no_og_returns_none(self):
+        """No gallery img and no og:image → None."""
+        html = '<html><body><p>Nothing here</p></body></html>'
+        result = adapter.get_image_url(html, URL)
+        assert result is None
+
+    def test_business_url_gallery_on_business_page_returned(self):
+        """Business page has gallery img → returned immediately, consumer fetch never called."""
+        html = _html_gallery_img(_GALLERY_IMG)
+        result = adapter.get_image_url(html, _BUSINESS_URL)
+        assert result == _GALLERY_IMG
+
+    def test_business_url_gallery_missing_falls_back_to_consumer_gallery(self):
+        """Business page has no gallery img; consumer page does → consumer gallery returned."""
+        consumer_html = _html_gallery_img(_GALLERY_IMG)
+        with patch('adapters.samsung.fetch_url', return_value=(consumer_html, '')):
+            result = adapter.get_image_url('<html><body></body></html>', _BUSINESS_URL)
+        assert result == _GALLERY_IMG
+
+    def test_business_url_both_missing_consumer_og_fallback(self):
+        """No gallery on business or consumer page; consumer has valid og:image → returned."""
+        consumer_html = _html_og(_PRODUCT_IMG)
+        with patch('adapters.samsung.fetch_url', return_value=(consumer_html, '')):
+            result = adapter.get_image_url('<html><body></body></html>', _BUSINESS_URL)
+        assert result == _PRODUCT_IMG

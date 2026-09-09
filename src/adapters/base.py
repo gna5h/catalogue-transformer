@@ -67,6 +67,22 @@ _HEADERS = {
 }
 
 
+def _is_dead_link_redirect(requested_url: str, final_url: str) -> bool:
+    """Return True if final_url looks like a silent redirect to a category page or homepage.
+
+    A product URL that 302-redirects to a significantly shallower path (2+ fewer path
+    segments) is a reliable dead-link indicator.  Trailing-slash normalisation and other
+    same-depth redirects are not flagged.
+    """
+    req = urlparse(requested_url)
+    fin = urlparse(final_url)
+    if req.netloc != fin.netloc:
+        return True
+    req_segs = [s for s in req.path.split('/') if s]
+    fin_segs = [s for s in fin.path.split('/') if s]
+    return len(req_segs) - len(fin_segs) >= 2
+
+
 def fetch_url(url: str, *, binary: bool = False) -> tuple[Optional[bytes | str], str]:
     """
     Politely fetch a URL.
@@ -75,6 +91,10 @@ def fetch_url(url: str, *, binary: bool = False) -> tuple[Optional[bytes | str],
     content is None when the fetch failed; error_reason describes why.
     binary=True returns raw bytes (for PDFs); False returns decoded text.
     Respects a per-domain minimum delay to avoid hammering sites.
+
+    A 200 response whose final URL (after redirects) has 2+ fewer path segments than
+    the requested URL is treated as a dead-link redirect and returns (None, 'redirected
+    to: <final_url>').  This distinguishes dead-link 302s from genuine parse misses.
     """
     domain = urlparse(url).netloc
 
@@ -101,6 +121,10 @@ def fetch_url(url: str, *, binary: bool = False) -> tuple[Optional[bytes | str],
         return None, f'access refused (HTTP {resp.status_code})'
     if not resp.ok:
         return None, f'HTTP {resp.status_code}'
+
+    final_url = getattr(resp, 'url', None)
+    if final_url and _is_dead_link_redirect(url, final_url):
+        return None, f'redirected to: {final_url}'
 
     if binary:
         return resp.content, ''

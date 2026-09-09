@@ -45,7 +45,8 @@ class DimensionResult:
 class ImageResult:
     """Outcome of a single image extraction attempt."""
     image_bytes: Optional[bytes] = None
-    status:      str             = 'Not Found'  # 'Embedded' | 'Not Found' | 'Download Failed'
+    status:      str             = 'Not Found'   # 'Embedded' | 'Not Found' | 'Download Failed'
+    reason:      str             = ''            # populated when status == 'Download Failed'
 
 
 # ---------------------------------------------------------------------------
@@ -179,30 +180,61 @@ def get_og_image_url(html: str) -> Optional[str]:
 def prepare_image(image_url: str) -> ImageResult:
     """Download image_url, resize to ~180px on the longer edge, re-encode as JPEG.
 
-    Never raises — returns Download Failed on any error.
-    Reuses the shared fetch_url rate-limiter for the download.
+    Never raises. Retries up to 3 times on network failure.
+    Logs each failed attempt to stderr with the specific error.
+    Returns Download Failed (with reason) after all attempts are exhausted.
     """
-    try:
-        from io import BytesIO
-        from PIL import Image as PILImage
+    import sys
+    from io import BytesIO
+    from PIL import Image as PILImage
 
+    last_reason = 'no attempts made'
+    for attempt in range(1, 4):
         img_data, _err = fetch_url(image_url, binary=True)
         if img_data is None:
-            return ImageResult(status='Download Failed')
+            last_reason = _err or 'fetch returned None'
+            print(
+                f'[prepare_image] attempt {attempt}/3 failed: {last_reason}  url={image_url}',
+                file=sys.stderr,
+            )
+            continue  # retry; fetch_url rate-limiter enforces >=1.5 s between attempts
 
-        img = PILImage.open(BytesIO(img_data)).convert('RGB')
-        max_px = 180
-        w, h = img.size
-        ratio = min(max_px / w, max_px / h)
-        if ratio < 1.0:
-            img = img.resize((int(w * ratio), int(h * ratio)), PILImage.LANCZOS)
+        # Validate magic bytes to detect HTML error pages served as 200 OK
+        if not (img_data.startswith(b'\xff\xd8\xff') or        # JPEG
+                img_data.startswith(b'\x89PNG\r\n\x1a\n') or   # PNG
+                img_data.startswith(b'GIF8') or                 # GIF
+                img_data[:4] == b'RIFF'):                       # WebP
+            last_reason = (
+                f'non-image response ({len(img_data)} bytes, '
+                f'starts: {img_data[:20]!r})'
+            )
+            print(
+                f'[prepare_image] non-image content on attempt {attempt}/3: '
+                f'{last_reason}  url={image_url}',
+                file=sys.stderr,
+            )
+            break  # not a transient error — no benefit to retrying
 
-        buf = BytesIO()
-        img.save(buf, format='JPEG', quality=85)
-        return ImageResult(image_bytes=buf.getvalue(), status='Embedded')
+        try:
+            img = PILImage.open(BytesIO(img_data)).convert('RGB')
+            max_px = 180
+            w, h = img.size
+            ratio = min(max_px / w, max_px / h)
+            if ratio < 1.0:
+                img = img.resize((int(w * ratio), int(h * ratio)), PILImage.LANCZOS)
+            buf = BytesIO()
+            img.save(buf, format='JPEG', quality=85)
+            return ImageResult(image_bytes=buf.getvalue(), status='Embedded')
+        except Exception as exc:
+            last_reason = f'{type(exc).__name__}: {exc}'
+            print(
+                f'[prepare_image] PIL error on attempt {attempt}/3: '
+                f'{last_reason}  url={image_url}',
+                file=sys.stderr,
+            )
+            break  # PIL failure is not a transient network error
 
-    except Exception:
-        return ImageResult(status='Download Failed')
+    return ImageResult(status='Download Failed', reason=last_reason)
 
 
 # ---------------------------------------------------------------------------
